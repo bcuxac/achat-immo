@@ -1,11 +1,32 @@
 [project]
 name = "finances"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "Simulateur Python d'investissement immobilier locatif."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
-    "pandas>=2.3.0",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.1",
     "plotly>=6.1.2",
+    "pydantic>=2.11.7",
     "scipy>=1.15.3",
 ]
+
+[project.scripts]
+achat-immo = "achat_immo.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/achat_immo"]
