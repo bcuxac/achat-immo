@@ -153,6 +153,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             run_id INTEGER NOT NULL,
             annonce_id INTEGER NOT NULL,
             scenario TEXT NOT NULL,
+            prix_achat REAL NOT NULL DEFAULT 0,
+            cout_total_projet REAL NOT NULL DEFAULT 0,
             loyer_hc_mensuel REAL NOT NULL,
             taux_credit REAL NOT NULL,
             duree_annees INTEGER NOT NULL,
@@ -224,6 +226,8 @@ def _migrate_simulation_results(conn: sqlite3.Connection) -> None:
         "loyer_hc_mensuel": "ALTER TABLE simulation_results ADD COLUMN loyer_hc_mensuel REAL NOT NULL DEFAULT 0",
         "montant_emprunte": "ALTER TABLE simulation_results ADD COLUMN montant_emprunte REAL NOT NULL DEFAULT 0",
         "diagnostics": "ALTER TABLE simulation_results ADD COLUMN diagnostics TEXT NOT NULL DEFAULT ''",
+        "prix_achat": "ALTER TABLE simulation_results ADD COLUMN prix_achat REAL NOT NULL DEFAULT 0",
+        "cout_total_projet": "ALTER TABLE simulation_results ADD COLUMN cout_total_projet REAL NOT NULL DEFAULT 0",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -547,20 +551,23 @@ def save_simulation_run(
     conn.executemany(
         """
         INSERT INTO simulation_results (
-            run_id, annonce_id, scenario, loyer_hc_mensuel, taux_credit, duree_annees, apport,
+            run_id, annonce_id, scenario, prix_achat, cout_total_projet,
+            loyer_hc_mensuel, taux_credit, duree_annees, apport,
             vacance_mois, gestion_agence, frais_gestion_pct, mensualite_totale,
             montant_emprunte, cashflow_mensuel_avant_impot, cashflow_mensuel_apres_impot,
             effort_epargne_mensuel, rendement_net_avant_impot_pct,
             rendement_net_net_pct, patrimoine_net_horizon,
             score, decision, alertes, diagnostics
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 run_id,
                 annonce_id,
                 row.get("scenario", ""),
+                row.get("prix_achat", 0.0),
+                row.get("cout_total_projet", 0.0),
                 row["loyer_hc_mensuel"],
                 row["taux_credit"],
                 row["duree_annees"],

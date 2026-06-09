@@ -438,6 +438,20 @@ def _simulation_inputs(
     with credit:
         with st.container(border=True):
             st.markdown("**Credit**")
+            prix_reference = float(bien.prix_achat)
+            prix_min = st.number_input(
+                "Prix achat min",
+                min_value=1_000.0,
+                value=max(1_000.0, prix_reference - 10_000.0),
+                step=1_000.0,
+            )
+            prix_max = st.number_input(
+                "Prix achat max",
+                min_value=1_000.0,
+                value=prix_reference,
+                step=1_000.0,
+            )
+            prix_pas = st.number_input("Pas prix", min_value=1_000.0, value=5_000.0, step=1_000.0)
             taux_min = st.number_input("Taux credit min %", min_value=0.0, value=3.30, step=0.10, format="%.2f")
             taux_max = st.number_input("Taux credit max %", min_value=0.0, value=4.00, step=0.10, format="%.2f")
             taux_pas = st.number_input("Pas taux %", min_value=0.01, value=0.10, step=0.01, format="%.2f")
@@ -466,6 +480,7 @@ def _simulation_inputs(
             commentaire = st.text_input("Libelle de sauvegarde", value="simulation de travail")
 
     try:
+        prix_achats = generer_plage_float(prix_min, prix_max, prix_pas, decimales=0)
         loyers = generer_plage_float(loyer_min, loyer_max, loyer_pas, decimales=0)
         taux = generer_plage_float(taux_min, taux_max, taux_pas)
         durees = generer_plage_int(int(duree_min), int(duree_max), int(duree_pas))
@@ -480,6 +495,7 @@ def _simulation_inputs(
         frais_gestion_pct=float(frais_gestion[0]) if frais_gestion else 7.0,
     )
     params = GrilleParametres(
+        prix_achats=_as_float_tuple(list(prix_achats)),
         loyers_hc_mensuels=_as_float_tuple(list(loyers)),
         taux_credit=_as_float_tuple(taux),
         durees_annees=_as_int_tuple(durees),
@@ -517,7 +533,15 @@ def _gestion_label(value: object) -> str:
 
 
 def _pret_range(bien: BienImmobilier, params: GrilleParametres) -> tuple[float, float] | None:
-    montants = [bien.cout_total_projet - apport for apport in params.apports if apport <= bien.cout_total_projet]
+    prix_achats = params.prix_achats or (bien.prix_achat,)
+    montants = []
+    for prix_achat in prix_achats:
+        bien_scenario = replace(bien, prix_negocie=prix_achat)
+        montants.extend(
+            bien_scenario.cout_total_projet - apport
+            for apport in params.apports
+            if apport <= bien_scenario.cout_total_projet
+        )
     if not montants:
         return None
     return min(montants), max(montants)
@@ -525,15 +549,16 @@ def _pret_range(bien: BienImmobilier, params: GrilleParametres) -> tuple[float, 
 
 def _simulation_summary(bien: BienImmobilier, params: GrilleParametres, scenario_count: int) -> None:
     pret = _pret_range(bien, params)
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Cout total projet", _format_eur(bien.cout_total_projet))
     if pret is None:
         c2.metric("Pret necessaire", "Aucun apport valide")
     else:
         min_pret, max_pret = pret
         c2.metric("Pret necessaire", f"{_format_eur(min_pret)} - {_format_eur(max_pret)}")
-    c3.metric("Loyers testes", len(params.loyers_hc_mensuels))
-    c4.metric("Simulations prevues", f"{scenario_count:,}")
+    c3.metric("Prix testes", len(params.prix_achats))
+    c4.metric("Loyers testes", len(params.loyers_hc_mensuels))
+    c5.metric("Simulations prevues", f"{scenario_count:,}")
 
 
 def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: HypothesesAchatRecord | None) -> None:
@@ -597,6 +622,8 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
 
     cols = [
         "score",
+        "prix_achat",
+        "cout_total_projet",
         "loyer_hc_mensuel",
         "taux_credit",
         "duree_annees",
@@ -653,7 +680,7 @@ def _robustesse_summary(robustesse: RobustesseGrille) -> None:
 
     c5, c6, c7, c8 = st.columns(4)
     c5.metric("Scenarios positifs", f"{robustesse.nb_positifs:,}", f"{robustesse.pct_positifs:.1f} %")
-    c6.metric("Pire scenario", _format_eur_optional(robustesse.cashflow_min))
+    c6.metric("Prix max viable", _format_eur_optional(robustesse.prix_max_viable))
     c7.metric("Meilleur prudent", _format_eur_optional(robustesse.meilleur_cashflow_prudent))
     c8.metric("Meilleur agence", _format_eur_optional(robustesse.meilleur_cashflow_agence))
 
@@ -671,23 +698,26 @@ def _robustesse_summary(robustesse: RobustesseGrille) -> None:
 
 def _visualisations(df: pd.DataFrame) -> None:
     st.subheader("Cash-flow mensuel annee 1")
-    f1, f2, f3, f4 = st.columns(4)
+    f1, f2, f3, f4, f5 = st.columns(5)
     with f1:
-        loyer = st.selectbox("Loyer HC", sorted(df["loyer_hc_mensuel"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
+        prix_achat = st.selectbox("Prix achat", sorted(df["prix_achat"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
     with f2:
-        apport = st.selectbox("Apport", sorted(df["apport"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
+        loyer = st.selectbox("Loyer HC", sorted(df["loyer_hc_mensuel"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
     with f3:
+        apport = st.selectbox("Apport", sorted(df["apport"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
+    with f4:
         gestion = st.selectbox(
             "Gestion",
             sorted(df["gestion_agence"].unique()),
             format_func=lambda v: "agence" if v else "directe",
         )
-    with f4:
+    with f5:
         frais_gestion_options = sorted(df[df["gestion_agence"] == gestion]["frais_gestion_pct"].unique())
         frais_gestion = st.selectbox("Frais gestion", frais_gestion_options, format_func=lambda v: f"{v:g} %")
 
     filtered = df[
-        (df["loyer_hc_mensuel"] == loyer)
+        (df["prix_achat"] == prix_achat)
+        & (df["loyer_hc_mensuel"] == loyer)
         & (df["apport"] == apport)
         & (df["gestion_agence"] == gestion)
         & (df["frais_gestion_pct"] == frais_gestion)
@@ -705,7 +735,8 @@ def _visualisations(df: pd.DataFrame) -> None:
 
     direct_mask = ~df["gestion_agence"].astype(bool)
     chart_df = df[
-        (df["apport"] == apport)
+        (df["prix_achat"] == prix_achat)
+        & (df["apport"] == apport)
         & (direct_mask | (df["frais_gestion_pct"] == frais_gestion))
     ].copy()
     chart_df["gestion"] = chart_df["gestion_agence"].map(_gestion_label)
@@ -939,6 +970,7 @@ def _comparison_page(conn, rows: list[dict[str, Any]], annonce: AnnonceRecord | 
                         "pct_scenarios_viables",
                         "nb_scenarios_viables",
                         "score",
+                        "prix_achat",
                         "loyer_hc_mensuel",
                         "cashflow_mensuel_apres_impot",
                         "effort_epargne_mensuel",

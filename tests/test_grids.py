@@ -74,6 +74,27 @@ def test_grille_respecte_gestion_agence_impossible() -> None:
     assert resultats[0].gestion_agence is False
 
 
+def test_grille_itere_les_prix_d_achat() -> None:
+    bien = BienImmobilier(ville="Nimes", surface_m2=40, prix_affiche=90_000)
+    location = HypothesesLocation(loyer_hc_mensuel=620)
+    parametres = GrilleParametres(
+        prix_achats=(85_000, 90_000),
+        taux_credit=(3.6,),
+        durees_annees=(20,),
+        apports=(15_000,),
+        vacances_mois=(1.0,),
+        gestions_agence=(False,),
+        frais_gestion_pct=(7.0,),
+        horizon_annees=5,
+    )
+
+    resultats = simuler_grille_annonce(bien, location, parametres=parametres)
+
+    assert {resultat.prix_achat for resultat in resultats} == {85_000, 90_000}
+    assert {resultat.to_dict()["cout_total_projet"] for resultat in resultats} == {85_000, 90_000}
+    assert compter_scenarios_grille(bien, location, parametres) == 2
+
+
 def test_grille_to_dataframe() -> None:
     bien = BienImmobilier(ville="Nimes", surface_m2=40, prix_affiche=90_000)
     location = HypothesesLocation(loyer_hc_mensuel=620)
@@ -91,6 +112,7 @@ def test_grille_to_dataframe() -> None:
 
     assert len(df) == 1
     assert df.loc[0, "taux_credit"] == 3.6
+    assert df.loc[0, "prix_achat"] == 90_000
     assert df.loc[0, "loyer_hc_mensuel"] == 620
     assert "montant_emprunte" in df.columns
     assert "patrimoine_net_horizon" in df.columns

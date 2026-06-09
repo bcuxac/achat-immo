@@ -48,6 +48,8 @@ class RobustesseGrille:
     cashflow_max: float | None
     meilleur_cashflow_prudent: float | None
     meilleur_cashflow_agence: float | None
+    prix_max_viable: float | None
+    prix_min_simule: float | None
     decision: str
     raisons: tuple[str, ...] = ()
     conditions_validite: tuple[str, ...] = ()
@@ -114,6 +116,9 @@ def _conditions(rows: list[Mapping[str, Any]], seuils: SeuilsDecision) -> tuple[
         f"Taux credit <= {_max_or_none(float(row['taux_credit']) for row in viables):.2f} %",
         f"Vacance <= {_max_or_none(float(row['vacance_mois']) for row in viables):g} mois/an",
     ]
+    prix_viables = [float(row.get("prix_achat", 0.0)) for row in viables if float(row.get("prix_achat", 0.0)) > 0]
+    if prix_viables:
+        conditions.insert(0, f"Prix achat <= {max(prix_viables):,.0f} EUR")
     if any(_bool_value(row["gestion_agence"]) for row in viables):
         conditions.append("Au moins un scenario reste viable avec gestion agence.")
     else:
@@ -146,11 +151,13 @@ def analyser_grille(
             cashflow_min=None,
             cashflow_p10=None,
             cashflow_median=None,
-            cashflow_p90=None,
-            cashflow_max=None,
-            meilleur_cashflow_prudent=None,
-            meilleur_cashflow_agence=None,
-            decision="diagnostic_incomplet",
+        cashflow_p90=None,
+        cashflow_max=None,
+        meilleur_cashflow_prudent=None,
+        meilleur_cashflow_agence=None,
+        prix_max_viable=None,
+        prix_min_simule=None,
+        decision="diagnostic_incomplet",
             raisons=("Aucun scenario disponible.",),
             conditions_validite=("Relancer une simulation avec des parametres valides.",),
             seuil_cashflow_min=seuils.cashflow_mensuel_min,
@@ -168,6 +175,8 @@ def analyser_grille(
     pct_positifs = len(positifs) / len(lignes) * 100
     prudent_rows = [row for row in lignes if float(row["vacance_mois"]) >= 1.0]
     agence_rows = [row for row in lignes if _bool_value(row["gestion_agence"])]
+    prix_simules = [float(row.get("prix_achat", 0.0)) for row in lignes if float(row.get("prix_achat", 0.0)) > 0]
+    prix_viables = [float(row.get("prix_achat", 0.0)) for row in viables if float(row.get("prix_achat", 0.0)) > 0]
 
     raisons: list[str] = []
     if blocages:
@@ -213,6 +222,8 @@ def analyser_grille(
             if agence_rows
             else None
         ),
+        prix_max_viable=round(max(prix_viables), 2) if prix_viables else None,
+        prix_min_simule=round(min(prix_simules), 2) if prix_simules else None,
         decision=decision,
         raisons=tuple(raisons),
         conditions_validite=_conditions(lignes, seuils),

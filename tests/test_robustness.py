@@ -4,6 +4,7 @@ from achat_immo.robustness import analyser_grille
 def _row(
     cashflow: float,
     *,
+    prix_achat: float = 90_000,
     loyer: float = 600,
     apport: float = 15_000,
     taux: float = 3.6,
@@ -14,6 +15,7 @@ def _row(
 ) -> dict[str, object]:
     return {
         "loyer_hc_mensuel": loyer,
+        "prix_achat": prix_achat,
         "taux_credit": taux,
         "duree_annees": 20,
         "apport": apport,
@@ -49,14 +51,16 @@ def test_analyse_grille_rejette_si_aucun_scenario_viable() -> None:
 def test_analyse_grille_identifie_conditions_de_validite() -> None:
     robustesse = analyser_grille(
         [
-            _row(-260, loyer=550, apport=10_000, taux=4.0, vacance=2.0),
-            _row(-150, loyer=600, apport=15_000, taux=3.8, vacance=1.0),
-            _row(20, loyer=650, apport=20_000, taux=3.4, vacance=0.0, gestion=True),
+            _row(-260, prix_achat=95_000, loyer=550, apport=10_000, taux=4.0, vacance=2.0),
+            _row(-150, prix_achat=90_000, loyer=600, apport=15_000, taux=3.8, vacance=1.0),
+            _row(20, prix_achat=85_000, loyer=650, apport=20_000, taux=3.4, vacance=0.0, gestion=True),
         ]
     )
 
     assert robustesse.decision == "a_creuser"
     assert robustesse.nb_viables == 2
     assert robustesse.nb_positifs == 1
+    assert robustesse.prix_max_viable == 90_000
+    assert "Prix achat <= 90,000 EUR" in robustesse.conditions_validite
     assert "Loyer HC >= 600 EUR" in robustesse.conditions_validite
     assert "Aucun scenario ne produit un cash-flow positif." not in robustesse.conditions_validite

@@ -62,6 +62,7 @@ def generer_plage_int(borne_min: int, borne_max: int, pas: int = 1) -> tuple[int
 class GrilleParametres:
     """Hypotheses iterees automatiquement par l'application."""
 
+    prix_achats: tuple[float, ...] = ()
     loyers_hc_mensuels: tuple[float, ...] = ()
     taux_credit: tuple[float, ...] = (3.3, 3.6, 4.0)
     durees_annees: tuple[int, ...] = (15, 20, 25)
@@ -78,6 +79,7 @@ class GrilleParametres:
 class GrilleResultat:
     """Resultat d'une combinaison de grille."""
 
+    prix_achat: float
     loyer_hc_mensuel: float
     taux_credit: float
     duree_annees: int
@@ -96,6 +98,8 @@ class GrilleResultat:
 
         return {
             "scenario": self.resultat.scenario.nom,
+            "prix_achat": self.prix_achat,
+            "cout_total_projet": self.resultat.cout_total_projet,
             "loyer_hc_mensuel": self.loyer_hc_mensuel,
             "taux_credit": self.taux_credit,
             "duree_annees": self.duree_annees,
@@ -134,12 +138,14 @@ def simuler_grille_annonce(
     parametres = parametres or GrilleParametres()
     scenario_base = scenario_base or scenario_central(parametres.horizon_annees)
     gestions = parametres.gestions_agence if gestion_agence_possible else (False,)
+    prix_achats = parametres.prix_achats or (bien.prix_achat,)
     loyers = parametres.loyers_hc_mensuels or (location.loyer_hc_mensuel,)
     if parametres.appliquer_plafond_loyer:
         loyers = borner_loyers_hc(loyers, bien, location)
     resultats: list[GrilleResultat] = []
 
-    for loyer, taux, duree, apport, vacance, gestion in product(
+    for prix_achat, loyer, taux, duree, apport, vacance, gestion in product(
+        prix_achats,
         loyers,
         parametres.taux_credit,
         parametres.durees_annees,
@@ -149,7 +155,8 @@ def simuler_grille_annonce(
     ):
         frais_options = parametres.frais_gestion_pct if gestion else (0.0,)
         for frais_gestion_pct in frais_options:
-            if apport > bien.cout_total_projet:
+            bien_scenario = replace(bien, prix_negocie=prix_achat)
+            if apport > bien_scenario.cout_total_projet:
                 continue
 
             location_scenario = replace(
@@ -168,7 +175,7 @@ def simuler_grille_annonce(
             scenario = Scenario(
                 nom=(
                     f"h{parametres.horizon_annees}_t{taux:g}_d{duree}"
-                    f"_l{int(loyer)}_a{int(apport)}_v{vacance:g}_g{int(gestion)}"
+                    f"_p{int(prix_achat)}_l{int(loyer)}_a{int(apport)}_v{vacance:g}_g{int(gestion)}"
                     f"_fg{frais_gestion_pct:g}"
                 ),
                 horizon_annees=parametres.horizon_annees,
@@ -179,16 +186,17 @@ def simuler_grille_annonce(
                 frais_revente_pct=scenario_base.frais_revente_pct,
             )
             resultat = simuler_bien_sur_horizon(
-                bien=bien,
+                bien=bien_scenario,
                 location=location_scenario,
                 financement=financement,
                 fiscalite=fiscalite,
                 scenario=scenario,
             )
-            diagnostics = diagnostiquer_annonce(bien, location_scenario)
+            diagnostics = diagnostiquer_annonce(bien_scenario, location_scenario)
             score = scorer_bien(resultat, diagnostics=diagnostics)
             resultats.append(
                 GrilleResultat(
+                    prix_achat=prix_achat,
                     loyer_hc_mensuel=loyer,
                     taux_credit=taux,
                     duree_annees=duree,
@@ -232,7 +240,15 @@ def compter_scenarios_grille(
     if parametres.appliquer_plafond_loyer:
         loyers = borner_loyers_hc(loyers, bien, location)
     gestions = parametres.gestions_agence if gestion_agence_possible else (False,)
-    apports_valides = tuple(apport for apport in parametres.apports if apport <= bien.cout_total_projet)
+    prix_achats = parametres.prix_achats or (bien.prix_achat,)
+    apports_par_prix = {
+        prix_achat: tuple(
+            apport
+            for apport in parametres.apports
+            if apport <= replace(bien, prix_negocie=prix_achat).cout_total_projet
+        )
+        for prix_achat in prix_achats
+    }
     scenarios_gestion = sum(
         len(parametres.frais_gestion_pct) if gestion else 1
         for gestion in gestions
@@ -241,7 +257,7 @@ def compter_scenarios_grille(
         len(loyers)
         * len(parametres.taux_credit)
         * len(parametres.durees_annees)
-        * len(apports_valides)
         * len(parametres.vacances_mois)
         * scenarios_gestion
+        * sum(len(apports) for apports in apports_par_prix.values())
     )
