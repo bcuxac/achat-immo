@@ -65,6 +65,7 @@ def charges_annuelles(
         "assurance_pno": location.assurance_pno,
         "assurance_gli": location.assurance_gli,
         "gestion_locative": frais_gestion,
+        "cfe": location.cfe_annuelle,
         "comptable_lmnp": location.comptable_lmnp,
         "entretien": location.entretien_annuel,
         "travaux_futurs": location.travaux_futurs_annuels,

@@ -13,8 +13,10 @@ from achat_immo.models import (
     BienImmobilier,
     EpoqueConstruction,
     Financement,
+    Fiscalite,
     HypothesesLocation,
     ModeLocation,
+    RegimeFiscal,
     TypeBien,
 )
 
@@ -68,8 +70,18 @@ class HypothesesAchatRecord:
     assurance_pno: float = 180.0
     assurance_gli: float = 0.0
     frais_gestion_pct: float = 7.0
+    cfe_annuelle: float = 0.0
     comptable_lmnp: float = 500.0
     entretien_annuel: float = 500.0
+    regime_fiscal: RegimeFiscal = RegimeFiscal.LMNP_REEL
+    tmi_pct: float = 30.0
+    prelevements_sociaux_pct: float = 18.6
+    part_terrain_pct: float = 15.0
+    duree_amortissement_bien_annees: int = 30
+    duree_amortissement_travaux_annees: int = 15
+    duree_amortissement_meubles_annees: int = 7
+    abattement_micro_bic_pct: float = 50.0
+    abattement_micro_foncier_pct: float = 30.0
     gestion_agence_possible: bool = True
     apport_reference: float = 15_000.0
     taux_credit_reference: float = 3.6
@@ -129,8 +141,18 @@ def init_db(conn: sqlite3.Connection) -> None:
             assurance_pno REAL NOT NULL DEFAULT 180,
             assurance_gli REAL NOT NULL DEFAULT 0,
             frais_gestion_pct REAL NOT NULL DEFAULT 7,
+            cfe_annuelle REAL NOT NULL DEFAULT 0,
             comptable_lmnp REAL NOT NULL DEFAULT 500,
             entretien_annuel REAL NOT NULL DEFAULT 500,
+            regime_fiscal TEXT NOT NULL DEFAULT 'lmnp_reel',
+            tmi_pct REAL NOT NULL DEFAULT 30,
+            prelevements_sociaux_pct REAL NOT NULL DEFAULT 18.6,
+            part_terrain_pct REAL NOT NULL DEFAULT 15,
+            duree_amortissement_bien_annees INTEGER NOT NULL DEFAULT 30,
+            duree_amortissement_travaux_annees INTEGER NOT NULL DEFAULT 15,
+            duree_amortissement_meubles_annees INTEGER NOT NULL DEFAULT 7,
+            abattement_micro_bic_pct REAL NOT NULL DEFAULT 50,
+            abattement_micro_foncier_pct REAL NOT NULL DEFAULT 30,
             gestion_agence_possible INTEGER NOT NULL DEFAULT 1,
             apport_reference REAL NOT NULL DEFAULT 15000,
             taux_credit_reference REAL NOT NULL DEFAULT 3.6,
@@ -212,6 +234,16 @@ def _migrate_hypotheses_achat(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "hypotheses_achat")
     migrations = {
         "mode_location": "ALTER TABLE hypotheses_achat ADD COLUMN mode_location TEXT NOT NULL DEFAULT 'meublee'",
+        "cfe_annuelle": "ALTER TABLE hypotheses_achat ADD COLUMN cfe_annuelle REAL NOT NULL DEFAULT 0",
+        "regime_fiscal": "ALTER TABLE hypotheses_achat ADD COLUMN regime_fiscal TEXT NOT NULL DEFAULT 'lmnp_reel'",
+        "tmi_pct": "ALTER TABLE hypotheses_achat ADD COLUMN tmi_pct REAL NOT NULL DEFAULT 30",
+        "prelevements_sociaux_pct": "ALTER TABLE hypotheses_achat ADD COLUMN prelevements_sociaux_pct REAL NOT NULL DEFAULT 18.6",
+        "part_terrain_pct": "ALTER TABLE hypotheses_achat ADD COLUMN part_terrain_pct REAL NOT NULL DEFAULT 15",
+        "duree_amortissement_bien_annees": "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_bien_annees INTEGER NOT NULL DEFAULT 30",
+        "duree_amortissement_travaux_annees": "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_travaux_annees INTEGER NOT NULL DEFAULT 15",
+        "duree_amortissement_meubles_annees": "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_meubles_annees INTEGER NOT NULL DEFAULT 7",
+        "abattement_micro_bic_pct": "ALTER TABLE hypotheses_achat ADD COLUMN abattement_micro_bic_pct REAL NOT NULL DEFAULT 50",
+        "abattement_micro_foncier_pct": "ALTER TABLE hypotheses_achat ADD COLUMN abattement_micro_foncier_pct REAL NOT NULL DEFAULT 30",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -261,6 +293,13 @@ def _mode_location(value: str) -> ModeLocation:
         return ModeLocation.MEUBLEE
 
 
+def _regime_fiscal(value: str) -> RegimeFiscal:
+    try:
+        return RegimeFiscal(value)
+    except ValueError:
+        return RegimeFiscal.LMNP_REEL
+
+
 def _annonce_from_row(row: sqlite3.Row) -> AnnonceRecord:
     return AnnonceRecord(
         id=int(row["id"]),
@@ -300,8 +339,18 @@ def _hypotheses_from_row(row: sqlite3.Row) -> HypothesesAchatRecord:
         assurance_pno=float(row["assurance_pno"]),
         assurance_gli=float(row["assurance_gli"]),
         frais_gestion_pct=float(row["frais_gestion_pct"]),
+        cfe_annuelle=float(row["cfe_annuelle"]),
         comptable_lmnp=float(row["comptable_lmnp"]),
         entretien_annuel=float(row["entretien_annuel"]),
+        regime_fiscal=_regime_fiscal(str(row["regime_fiscal"])),
+        tmi_pct=float(row["tmi_pct"]),
+        prelevements_sociaux_pct=float(row["prelevements_sociaux_pct"]),
+        part_terrain_pct=float(row["part_terrain_pct"]),
+        duree_amortissement_bien_annees=int(row["duree_amortissement_bien_annees"]),
+        duree_amortissement_travaux_annees=int(row["duree_amortissement_travaux_annees"]),
+        duree_amortissement_meubles_annees=int(row["duree_amortissement_meubles_annees"]),
+        abattement_micro_bic_pct=float(row["abattement_micro_bic_pct"]),
+        abattement_micro_foncier_pct=float(row["abattement_micro_foncier_pct"]),
         gestion_agence_possible=bool(row["gestion_agence_possible"]),
         apport_reference=float(row["apport_reference"]),
         taux_credit_reference=float(row["taux_credit_reference"]),
@@ -384,11 +433,15 @@ def save_annonce(
             annonce_id, frais_agence_achat, frais_notaire_estimes, travaux_estimes,
             meubles_estimes, frais_bancaires, garantie, loyer_hc_mensuel,
             mode_location, charges_copro_annuelles, charges_recuperables_annuelles, taxe_fonciere,
-            assurance_pno, assurance_gli, frais_gestion_pct, comptable_lmnp,
-            entretien_annuel, gestion_agence_possible, apport_reference,
+            assurance_pno, assurance_gli, frais_gestion_pct, cfe_annuelle, comptable_lmnp,
+            entretien_annuel, regime_fiscal, tmi_pct, prelevements_sociaux_pct,
+            part_terrain_pct, duree_amortissement_bien_annees,
+            duree_amortissement_travaux_annees, duree_amortissement_meubles_annees,
+            abattement_micro_bic_pct, abattement_micro_foncier_pct,
+            gestion_agence_possible, apport_reference,
             taux_credit_reference, duree_credit_reference, assurance_emprunteur_pct
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(annonce_id) DO UPDATE SET
             frais_agence_achat = excluded.frais_agence_achat,
             frais_notaire_estimes = excluded.frais_notaire_estimes,
@@ -404,8 +457,18 @@ def save_annonce(
             assurance_pno = excluded.assurance_pno,
             assurance_gli = excluded.assurance_gli,
             frais_gestion_pct = excluded.frais_gestion_pct,
+            cfe_annuelle = excluded.cfe_annuelle,
             comptable_lmnp = excluded.comptable_lmnp,
             entretien_annuel = excluded.entretien_annuel,
+            regime_fiscal = excluded.regime_fiscal,
+            tmi_pct = excluded.tmi_pct,
+            prelevements_sociaux_pct = excluded.prelevements_sociaux_pct,
+            part_terrain_pct = excluded.part_terrain_pct,
+            duree_amortissement_bien_annees = excluded.duree_amortissement_bien_annees,
+            duree_amortissement_travaux_annees = excluded.duree_amortissement_travaux_annees,
+            duree_amortissement_meubles_annees = excluded.duree_amortissement_meubles_annees,
+            abattement_micro_bic_pct = excluded.abattement_micro_bic_pct,
+            abattement_micro_foncier_pct = excluded.abattement_micro_foncier_pct,
             gestion_agence_possible = excluded.gestion_agence_possible,
             apport_reference = excluded.apport_reference,
             taux_credit_reference = excluded.taux_credit_reference,
@@ -428,8 +491,18 @@ def save_annonce(
             hypotheses.assurance_pno,
             hypotheses.assurance_gli,
             hypotheses.frais_gestion_pct,
+            hypotheses.cfe_annuelle,
             hypotheses.comptable_lmnp,
             hypotheses.entretien_annuel,
+            hypotheses.regime_fiscal.value,
+            hypotheses.tmi_pct,
+            hypotheses.prelevements_sociaux_pct,
+            hypotheses.part_terrain_pct,
+            hypotheses.duree_amortissement_bien_annees,
+            hypotheses.duree_amortissement_travaux_annees,
+            hypotheses.duree_amortissement_meubles_annees,
+            hypotheses.abattement_micro_bic_pct,
+            hypotheses.abattement_micro_foncier_pct,
             int(hypotheses.gestion_agence_possible),
             hypotheses.apport_reference,
             hypotheses.taux_credit_reference,
@@ -521,6 +594,7 @@ def to_domain_models(
         assurance_pno=hypotheses.assurance_pno,
         assurance_gli=hypotheses.assurance_gli,
         frais_gestion_pct=hypotheses.frais_gestion_pct,
+        cfe_annuelle=hypotheses.cfe_annuelle,
         comptable_lmnp=hypotheses.comptable_lmnp,
         entretien_annuel=hypotheses.entretien_annuel,
     )
@@ -531,6 +605,22 @@ def to_domain_models(
         assurance_emprunteur_annuelle_pct=hypotheses.assurance_emprunteur_pct,
     )
     return bien, location, financement
+
+
+def fiscalite_from_hypotheses(hypotheses: HypothesesAchatRecord) -> Fiscalite:
+    """Construit les hypotheses fiscales associees a une annonce."""
+
+    return Fiscalite(
+        regime=hypotheses.regime_fiscal,
+        tmi_pct=hypotheses.tmi_pct,
+        prelevements_sociaux_pct=hypotheses.prelevements_sociaux_pct,
+        part_terrain_pct=hypotheses.part_terrain_pct,
+        duree_amortissement_bien_annees=hypotheses.duree_amortissement_bien_annees,
+        duree_amortissement_travaux_annees=hypotheses.duree_amortissement_travaux_annees,
+        duree_amortissement_meubles_annees=hypotheses.duree_amortissement_meubles_annees,
+        abattement_micro_bic_pct=hypotheses.abattement_micro_bic_pct,
+        abattement_micro_foncier_pct=hypotheses.abattement_micro_foncier_pct,
+    )
 
 
 def save_simulation_run(

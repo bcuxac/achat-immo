@@ -15,6 +15,9 @@ gestion locative et fiscalite.
 - taxe fonciere, charges non recuperables, PNO, comptabilite LMNP et entretien inclus ;
 - gestion agence activable avec frais en pourcentage des loyers encaisses ;
 - LMNP reel modelise avec amortissement simplifie et extensible ;
+- fiscalite configurable par annonce : regime, TMI, prelevements sociaux, CFE, abattements et amortissements ;
+- auto-remplissage auditable des hypotheses depuis l'annonce, avec confiance, source et explication ;
+- tooltips sur les champs d'hypotheses pour expliciter l'impact modele et les sources utiles ;
 - villes cibles fermees avec profils locaux pour borner les hypotheses legales ;
 - plafond de loyer local applique automatiquement quand il est calculable ;
 - diagnostic reglementaire separe du score financier ;
@@ -34,6 +37,7 @@ src/
 │   ├── grids.py        # grilles automatiques loyer x taux x duree x apport
 │   ├── city_profiles.py# profils locaux : villes ciblees, encadrement, plafonds
 │   ├── diagnostics.py  # points bloquants, donnees manquantes et alertes metier
+│   ├── hypothesis_inference.py # pre-remplissage auditable des hypotheses
 │   ├── robustness.py   # decision robuste, percentiles et conditions de validite
 │   ├── storage.py      # stockage SQLite local
 │   ├── comparison.py   # scoring et classement
@@ -74,6 +78,8 @@ Workflow de l'application :
 - `Tableau de bord` donne une vue base de donnees : annonces, statuts et derniers snapshots ;
 - `Annonce` contient les donnees factuelles du bien ;
 - `Hypotheses` contient les couts d'acquisition, charges et frais de modele ;
+- `Hypotheses` propose des suggestions automatiques depuis l'annonce, applicables aux champs vides ou a toute la fiche ;
+- `Hypotheses` contient aussi la fiscalite utilisee par les simulations : LMNP reel, micro-BIC, nue reel ou micro-foncier ;
 - `Simulations` estime le nombre de scenarios puis lance au clic les grilles loyer x taux x duree x apport x vacance x gestion ;
 - les resultats de simulation sont centres sur le cash-flow mensuel de l'annee 1, le pret necessaire et une carte de decision ;
 - la decision robuste affiche mediane, P10, part viable et conditions minimales observees avant le meilleur scenario ;
@@ -159,3 +165,24 @@ La suite couvre :
 - grilles automatiques de scenarios ;
 - stockage SQLite ;
 - scoring et export CSV.
+
+## Notes fiscales
+
+La fiscalite reste une approximation de travail, pas un rescrit. Les valeurs par
+defaut s'appuient sur les regles usuelles suivantes, a verifier lorsque la loi
+change :
+
+- location meublee longue duree au micro-BIC : seuil de recettes et abattement
+  indiques par impots.gouv.fr ;
+- prelevements sociaux 2026 : 18,6 % en location meublee et 17,2 % en location
+  nue, appliques sur le revenu net taxable modelise ;
+- location nue au micro-foncier : abattement forfaitaire de 30 % sous le seuil
+  de revenus fonciers ;
+- CFE : les loueurs en meuble peuvent y etre soumis.
+
+Sources utiles :
+
+- https://www.impots.gouv.fr/particulier/les-regimes-dimposition
+- https://www.impots.gouv.fr/particulier/questions/je-donne-un-bien-en-location-dois-je-payer-des-prelevements-sociaux
+- https://www.impots.gouv.fr/particulier/questions/je-fais-de-la-location-meublee-dois-je-payer-de-la-cfe-cotisation-fonciere-des
+- https://bofip.impots.gouv.fr/bofip/3973-PGP.html

@@ -46,4 +46,4 @@ def test_routeur_micro_bic() -> None:
 
     assert resultat.regime == RegimeFiscal.MICRO_BIC
     assert resultat.resultat_fiscal == 3_000
-    assert resultat.impot == 1_416
+    assert resultat.impot == 1_458

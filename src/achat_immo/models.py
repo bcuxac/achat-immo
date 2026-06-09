@@ -140,6 +140,7 @@ class HypothesesLocation:
     gestion_agence_active: bool = False
     frais_gestion_pct: float = 7.0
     frais_mise_location_annuels: float = 0.0
+    cfe_annuelle: float = 0.0
     comptable_lmnp: float = 500.0
     entretien_annuel: float = 500.0
     travaux_futurs_annuels: float = 0.0
@@ -157,6 +158,7 @@ class HypothesesLocation:
             "assurance_gli",
             "frais_gestion_pct",
             "frais_mise_location_annuels",
+            "cfe_annuelle",
             "comptable_lmnp",
             "entretien_annuel",
             "travaux_futurs_annuels",
@@ -203,7 +205,7 @@ class Fiscalite:
 
     regime: RegimeFiscal = RegimeFiscal.LMNP_REEL
     tmi_pct: float = 30.0
-    prelevements_sociaux_pct: float = 17.2
+    prelevements_sociaux_pct: float = 18.6
     part_terrain_pct: float = 15.0
     duree_amortissement_bien_annees: int = 30
     duree_amortissement_travaux_annees: int = 15

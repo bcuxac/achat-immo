@@ -4,6 +4,7 @@ from achat_immo.grids import GrilleParametres, simuler_grille_annonce
 from achat_immo.storage import (
     AnnonceRecord,
     HypothesesAchatRecord,
+    fiscalite_from_hypotheses,
     get_annonce_bundle,
     get_simulation_results,
     list_annonces,
@@ -13,7 +14,7 @@ from achat_immo.storage import (
     save_simulation_run,
     to_domain_models,
 )
-from achat_immo.models import EpoqueConstruction, ModeLocation
+from achat_immo.models import EpoqueConstruction, ModeLocation, RegimeFiscal
 
 
 def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:
@@ -38,6 +39,12 @@ def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:
             meubles_estimes=4_000,
             loyer_hc_mensuel=700,
             mode_location=ModeLocation.NUE,
+            cfe_annuelle=320,
+            regime_fiscal=RegimeFiscal.LOCATION_NUE_REEL,
+            tmi_pct=41,
+            prelevements_sociaux_pct=17.2,
+            part_terrain_pct=12,
+            duree_amortissement_bien_annees=35,
             taxe_fonciere=900,
             charges_copro_annuelles=1_200,
             charges_recuperables_annuelles=500,
@@ -47,6 +54,7 @@ def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:
     annonces = list_annonces(conn)
     annonce, hypotheses = get_annonce_bundle(conn, annonce_id)
     bien, location, financement = to_domain_models(annonce, hypotheses)
+    fiscalite = fiscalite_from_hypotheses(hypotheses)
 
     assert annonces[0]["ville"] == "Grenoble"
     assert bien.adresse_approx == "Rue test"
@@ -56,7 +64,12 @@ def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:
     assert bien.cout_total_projet == 127_800
     assert location.loyer_hc_mensuel == 700
     assert location.mode_location == ModeLocation.NUE
+    assert location.cfe_annuelle == 320
     assert financement.apport == 15_000
+    assert fiscalite.regime == RegimeFiscal.LOCATION_NUE_REEL
+    assert fiscalite.tmi_pct == 41
+    assert fiscalite.part_terrain_pct == 12
+    assert fiscalite.duree_amortissement_bien_annees == 35
 
 
 def test_sqlite_sauvegarde_run_de_simulation(tmp_path: Path) -> None:

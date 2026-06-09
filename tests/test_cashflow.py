@@ -22,6 +22,7 @@ def test_charges_et_cashflow_avec_gestion_agence() -> None:
         charges_copro_annuelles=1_200,
         charges_recuperables_annuelles=500,
         taxe_fonciere=900,
+        cfe_annuelle=250,
         gestion_agence_active=True,
         frais_gestion_pct=7,
         comptable_lmnp=500,
@@ -31,6 +32,7 @@ def test_charges_et_cashflow_avec_gestion_agence() -> None:
     charges = charges_annuelles(location, revenus)
 
     assert charges["charges_non_recuperables"] == 700
+    assert charges["cfe"] == 250
     assert charges["gestion_locative"] == 500.5
     assert cashflow_mensuel(revenus, charges, mensualite_totale=650, impot=0) < 0
 

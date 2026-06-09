@@ -33,18 +33,26 @@ from achat_immo.city_profiles import (
     supported_city_labels,
 )
 from achat_immo.diagnostics import DiagnosticStatus, diagnostiquer_annonce
+from achat_immo.hypothesis_inference import (
+    appliquer_suggestions,
+    inferer_hypotheses_depuis_annonce,
+    prelevements_sociaux_par_regime,
+    regime_fiscal_recommande,
+    regimes_compatibles,
+)
 from achat_immo.models import (
     BienImmobilier,
     EpoqueConstruction,
-    Fiscalite,
     HypothesesLocation,
     ModeLocation,
+    RegimeFiscal,
     TypeBien,
 )
 from achat_immo.robustness import RobustesseGrille, analyser_grille
 from achat_immo.storage import (
     AnnonceRecord,
     DEFAULT_DB_PATH,
+    fiscalite_from_hypotheses,
     HypothesesAchatRecord,
     get_annonce_bundle,
     get_simulation_results,
@@ -69,6 +77,113 @@ STATUTS = [
 ]
 
 
+HYPOTHESES_HELP = {
+    "frais_notaire_estimes": (
+        "Impact fort sur le cout total et le pret. Estimation automatique : environ 8 % dans l'ancien, "
+        "2,5 % si l'annonce mentionne neuf ou VEFA. A remplacer par le decompte notarial."
+    ),
+    "frais_agence_achat": (
+        "Impact fort si les honoraires sont a charge acquereur. Laisser a 0 si le prix est FAI ou si les "
+        "honoraires sont a charge vendeur."
+    ),
+    "travaux_estimes": (
+        "Impact tres fort : augmente le cout total mais peut aussi reduire le resultat fiscal au reel. "
+        "Inclure travaux immediats, energetiques, remise en location et marge d'imprevu."
+    ),
+    "meubles_estimes": (
+        "Budget mobilier pour une location meublee. Impact sur le financement et sur l'amortissement LMNP reel. "
+        "Mettre 0 en location nue."
+    ),
+    "frais_bancaires": (
+        "Frais de dossier, courtage eventuel et petits frais de mise en place du pret. Impact modere mais finance."
+    ),
+    "garantie": (
+        "Cautionnement, credit logement ou garantie bancaire. Impacte le cout total finance ; a remplacer par "
+        "l'offre bancaire des qu'elle existe."
+    ),
+    "mode_location": (
+        "Determine le cadre fiscal et parfois le plafond de loyer. Meuble : revenus BIC/LMNP, CFE possible. "
+        "Nue : revenus fonciers."
+    ),
+    "loyer_hc_mensuel": (
+        "Loyer hors charges de reference. Il sert a pre-remplir la grille ; a Grenoble il doit rester sous le "
+        "loyer de reference majore calcule. Source Grenoble : "
+        "https://www.grenoblealpesmetropole.fr/940-me-renseigner-sur-l-encadrement-des-loyers.htm"
+    ),
+    "taxe_fonciere": (
+        "Charge proprietaire recurrente, non incluse dans les charges locatives. Impact direct sur cash-flow "
+        "et rendement net."
+    ),
+    "charges_copro_annuelles": (
+        "Charges annuelles totales de copropriete payees par le proprietaire. Le modele retranche ensuite la "
+        "part recuperable pour calculer la charge bailleur nette."
+    ),
+    "charges_recuperables_annuelles": (
+        "Part des charges de copro refacturable au locataire. Ne doit pas depasser les charges copro annuelles."
+    ),
+    "assurance_pno": (
+        "Assurance proprietaire non occupant. Charge recurrente deductible au reel, impact modere mais quasi "
+        "systematique."
+    ),
+    "assurance_gli": (
+        "Garantie loyers impayes. Si elle est activee, saisir le cout annuel ; ordre de grandeur courant : "
+        "2,5 a 4 % des loyers charges comprises."
+    ),
+    "cfe_annuelle": (
+        "Cotisation fonciere des entreprises. Les locations meublees peuvent y etre soumises, meme en LMNP ; "
+        "exoneration generale si recettes <= 5 000 EUR. Source : "
+        "https://www.impots.gouv.fr/particulier/questions/je-fais-de-la-location-meublee-dois-je-payer-de-la-cfe-cotisation-fonciere-des"
+    ),
+    "comptable_lmnp": (
+        "Honoraires annuels d'expert-comptable ou plateforme comptable. Pertinent surtout en LMNP reel, car le "
+        "regime reel suppose une comptabilite et une declaration de resultat. Source : "
+        "https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
+    ),
+    "entretien_annuel": (
+        "Reserve annuelle pour petit entretien, remplacement et menus travaux non planifies. Impact direct sur "
+        "cash-flow prudent."
+    ),
+    "gestion_agence_possible": (
+        "Autorise la grille a tester les scenarios avec agence. Si decoche, les scenarios agence sont exclus."
+    ),
+    "regime_fiscal": (
+        "Choix du regime d'imposition modelise. Meuble : LMNP reel ou micro-BIC. Nue : reel foncier ou "
+        "micro-foncier. Source : https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
+    ),
+    "tmi_pct": (
+        "Tranche marginale d'imposition du foyer. Le modele applique TMI + prelevements sociaux au resultat "
+        "taxable positif ; c'est une approximation prudente."
+    ),
+    "prelevements_sociaux_pct": (
+        "Taux 2026 sur revenu net locatif : 17,2 % en location nue, 18,6 % en location meublee. Source : "
+        "https://www.impots.gouv.fr/particulier/questions/je-donne-un-bien-en-location-dois-je-payer-des-prelevements-sociaux"
+    ),
+    "part_terrain_pct": (
+        "Part du prix correspondant au terrain, non amortissable en LMNP reel. Valeur indicative a confirmer "
+        "avec le comptable."
+    ),
+    "duree_amortissement_bien_annees": (
+        "Duree d'amortissement indicative du bati en LMNP reel. L'amortissement ne peut pas creer de deficit "
+        "fiscal LMNP. Source : https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
+    ),
+    "duree_amortissement_travaux_annees": (
+        "Duree indicative d'amortissement des travaux immobilises au LMNP reel. A ajuster selon la nature des "
+        "travaux et le comptable."
+    ),
+    "duree_amortissement_meubles_annees": (
+        "Duree indicative d'amortissement du mobilier au LMNP reel. A ajuster selon le plan comptable retenu."
+    ),
+    "abattement_micro_bic_pct": (
+        "Abattement forfaitaire micro-BIC pour location meublee longue duree : 50 % dans le cas usuel modelise. "
+        "Les charges reelles ne sont alors pas deduites. Source : https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
+    ),
+    "abattement_micro_foncier_pct": (
+        "Abattement forfaitaire micro-foncier : 30 % si revenus fonciers bruts du foyer <= 15 000 EUR et pas "
+        "d'exclusion. Source : https://bofip.impots.gouv.fr/bofip/3973-PGP.html"
+    ),
+}
+
+
 @st.cache_resource
 def _database(db_path: str):
     return open_database(Path(db_path))
@@ -84,6 +199,38 @@ def _as_int_tuple(values: list[int]) -> tuple[int, ...]:
 
 def _enum_label(value: Any) -> str:
     return str(getattr(value, "value", value)).replace("_", " ")
+
+
+def _display_hypothesis_value(value: Any) -> str:
+    if hasattr(value, "value"):
+        return _enum_label(value)
+    if isinstance(value, bool):
+        return "oui" if value else "non"
+    if isinstance(value, float):
+        return f"{value:,.1f}" if value % 1 else f"{value:,.0f}"
+    return str(value)
+
+
+def _suggestions_dataframe(
+    hypotheses: HypothesesAchatRecord,
+    suggestions: dict[str, Any],
+) -> pd.DataFrame:
+    rows = []
+    for field, suggestion in suggestions.items():
+        current = getattr(hypotheses, field)
+        if current == suggestion.value:
+            continue
+        rows.append(
+            {
+                "champ": field,
+                "actuel": _display_hypothesis_value(current),
+                "suggere": _display_hypothesis_value(suggestion.value),
+                "confiance": suggestion.confidence,
+                "source": suggestion.source,
+                "raison": suggestion.reason,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _annonce_label(row: dict[str, Any]) -> str:
@@ -272,6 +419,45 @@ def _annonce_page(conn, annonce: AnnonceRecord | None, hypotheses: HypothesesAch
             st.rerun()
 
 
+def _hypotheses_inference_panel(
+    conn,
+    annonce: AnnonceRecord,
+    hypotheses: HypothesesAchatRecord,
+) -> None:
+    suggestions = inferer_hypotheses_depuis_annonce(annonce, hypotheses)
+    suggestions_df = _suggestions_dataframe(hypotheses, suggestions)
+    with st.expander("Suggestions automatiques depuis l'annonce", expanded=not suggestions_df.empty):
+        st.caption(
+            "Ces valeurs sont des propositions auditables. Elles accelerent la saisie, mais les champs "
+            "faible confiance doivent rester a verifier avant decision."
+        )
+        if suggestions_df.empty:
+            st.success("Les hypotheses sauvegardees sont deja alignees avec les suggestions automatiques.")
+        else:
+            st.dataframe(
+                suggestions_df,
+                hide_index=True,
+                width="stretch",
+            )
+            c1, c2 = st.columns(2)
+            if c1.button("Appliquer aux champs vides", width="stretch"):
+                save_annonce(
+                    conn,
+                    annonce,
+                    appliquer_suggestions(hypotheses, suggestions, only_empty=True),
+                )
+                st.success("Suggestions appliquees aux champs non renseignes.")
+                st.rerun()
+            if c2.button("Remplacer par les suggestions", width="stretch"):
+                save_annonce(
+                    conn,
+                    annonce,
+                    appliquer_suggestions(hypotheses, suggestions),
+                )
+                st.success("Hypotheses remplacees par les suggestions automatiques.")
+                st.rerun()
+
+
 def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: HypothesesAchatRecord | None) -> None:
     if annonce is None or hypotheses is None:
         st.info("Cree ou selectionne une annonce dans la barre laterale.")
@@ -279,33 +465,10 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
 
     st.subheader("Hypotheses du modele")
     st.caption("Ces valeurs ne viennent pas toutes de l'annonce. Elles cadrent le cout total et l'exploitation.")
+    _hypotheses_inference_panel(conn, annonce, hypotheses)
 
     with st.form("hypotheses_form"):
-        achat, exploitation, frais = st.columns(3)
-        with achat:
-            st.markdown("**Acquisition**")
-            frais_notaire = st.number_input(
-                "Frais notaire estimes",
-                min_value=0.0,
-                value=float(hypotheses.frais_notaire_estimes),
-                step=500.0,
-            )
-            frais_agence_achat = st.number_input(
-                "Frais agence achat",
-                min_value=0.0,
-                value=float(hypotheses.frais_agence_achat),
-                step=500.0,
-            )
-            travaux = st.number_input("Travaux", min_value=0.0, value=float(hypotheses.travaux_estimes), step=500.0)
-            meubles = st.number_input("Meubles", min_value=0.0, value=float(hypotheses.meubles_estimes), step=500.0)
-            frais_bancaires = st.number_input(
-                "Frais bancaires",
-                min_value=0.0,
-                value=float(hypotheses.frais_bancaires),
-                step=100.0,
-            )
-            garantie = st.number_input("Garantie", min_value=0.0, value=float(hypotheses.garantie), step=100.0)
-
+        achat, exploitation, frais, fiscalite_col = st.columns(4)
         with exploitation:
             st.markdown("**Exploitation**")
             mode_location = st.selectbox(
@@ -313,55 +476,236 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                 options=list(ModeLocation),
                 index=list(ModeLocation).index(hypotheses.mode_location),
                 format_func=_enum_label,
+                help=HYPOTHESES_HELP["mode_location"],
             )
             loyer_reference = st.number_input(
                 "Loyer HC de reference",
                 min_value=1.0,
                 value=float(hypotheses.loyer_hc_mensuel),
                 step=10.0,
-                help="Utilise seulement pour pre-remplir la grille de simulation.",
+                help=HYPOTHESES_HELP["loyer_hc_mensuel"],
             )
             taxe_fonciere = st.number_input(
                 "Taxe fonciere",
                 min_value=0.0,
                 value=float(hypotheses.taxe_fonciere),
                 step=50.0,
+                help=HYPOTHESES_HELP["taxe_fonciere"],
             )
             charges_copro = st.number_input(
                 "Charges copro annuelles",
                 min_value=0.0,
                 value=float(hypotheses.charges_copro_annuelles),
                 step=50.0,
+                help=HYPOTHESES_HELP["charges_copro_annuelles"],
             )
             charges_recup = st.number_input(
                 "Charges recuperables annuelles",
                 min_value=0.0,
                 value=float(hypotheses.charges_recuperables_annuelles),
                 step=50.0,
+                help=HYPOTHESES_HELP["charges_recuperables_annuelles"],
+            )
+
+        with fiscalite_col:
+            st.markdown("**Fiscalite**")
+            regime_options = regimes_compatibles(mode_location)
+            current_regime = (
+                hypotheses.regime_fiscal
+                if hypotheses.regime_fiscal in regime_options
+                else regime_fiscal_recommande(mode_location, float(loyer_reference) * 12)
+            )
+            regime_fiscal = st.selectbox(
+                "Regime",
+                options=list(regime_options),
+                index=list(regime_options).index(current_regime),
+                format_func=_enum_label,
+                help=HYPOTHESES_HELP["regime_fiscal"],
+            )
+            tmi_pct = st.number_input(
+                "TMI %",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(hypotheses.tmi_pct),
+                step=1.0,
+                format="%.1f",
+                help=HYPOTHESES_HELP["tmi_pct"],
+            )
+            expected_prelevements = prelevements_sociaux_par_regime(regime_fiscal)
+            prelevements_sociaux_pct = st.number_input(
+                "Prelevements sociaux %",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(hypotheses.prelevements_sociaux_pct),
+                step=0.1,
+                format="%.1f",
+                help=HYPOTHESES_HELP["prelevements_sociaux_pct"],
+            )
+            if abs(float(prelevements_sociaux_pct) - expected_prelevements) > 0.05:
+                st.warning(
+                    f"Taux officiel attendu pour ce regime : {expected_prelevements:.1f} %. "
+                    "Utilise les suggestions automatiques ou corrige le champ si ce n'est pas volontaire."
+                )
+            part_terrain_pct = hypotheses.part_terrain_pct
+            duree_amortissement_bien = hypotheses.duree_amortissement_bien_annees
+            duree_amortissement_travaux = hypotheses.duree_amortissement_travaux_annees
+            duree_amortissement_meubles = hypotheses.duree_amortissement_meubles_annees
+            abattement_micro_bic = hypotheses.abattement_micro_bic_pct
+            abattement_micro_foncier = hypotheses.abattement_micro_foncier_pct
+            if regime_fiscal == RegimeFiscal.LMNP_REEL:
+                part_terrain_pct = st.number_input(
+                    "Part terrain non amortissable %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(hypotheses.part_terrain_pct),
+                    step=1.0,
+                    format="%.1f",
+                    help=HYPOTHESES_HELP["part_terrain_pct"],
+                )
+                duree_amortissement_bien = st.number_input(
+                    "Amortissement bien annees",
+                    min_value=1,
+                    max_value=80,
+                    value=int(hypotheses.duree_amortissement_bien_annees),
+                    step=1,
+                    help=HYPOTHESES_HELP["duree_amortissement_bien_annees"],
+                )
+                duree_amortissement_travaux = st.number_input(
+                    "Amortissement travaux annees",
+                    min_value=1,
+                    max_value=50,
+                    value=int(hypotheses.duree_amortissement_travaux_annees),
+                    step=1,
+                    help=HYPOTHESES_HELP["duree_amortissement_travaux_annees"],
+                )
+                duree_amortissement_meubles = st.number_input(
+                    "Amortissement meubles annees",
+                    min_value=1,
+                    max_value=20,
+                    value=int(hypotheses.duree_amortissement_meubles_annees),
+                    step=1,
+                    help=HYPOTHESES_HELP["duree_amortissement_meubles_annees"],
+                )
+            elif regime_fiscal == RegimeFiscal.MICRO_BIC:
+                abattement_micro_bic = st.number_input(
+                    "Abattement micro-BIC %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(hypotheses.abattement_micro_bic_pct),
+                    step=1.0,
+                    format="%.1f",
+                    help=HYPOTHESES_HELP["abattement_micro_bic_pct"],
+                )
+            elif regime_fiscal == RegimeFiscal.MICRO_FONCIER:
+                abattement_micro_foncier = st.number_input(
+                    "Abattement micro-foncier %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(hypotheses.abattement_micro_foncier_pct),
+                    step=1.0,
+                    format="%.1f",
+                    help=HYPOTHESES_HELP["abattement_micro_foncier_pct"],
+                )
+
+        with achat:
+            st.markdown("**Acquisition**")
+            frais_notaire = st.number_input(
+                "Frais notaire estimes",
+                min_value=0.0,
+                value=float(hypotheses.frais_notaire_estimes),
+                step=500.0,
+                help=HYPOTHESES_HELP["frais_notaire_estimes"],
+            )
+            frais_agence_achat = st.number_input(
+                "Frais agence achat",
+                min_value=0.0,
+                value=float(hypotheses.frais_agence_achat),
+                step=500.0,
+                help=HYPOTHESES_HELP["frais_agence_achat"],
+            )
+            travaux = st.number_input(
+                "Travaux",
+                min_value=0.0,
+                value=float(hypotheses.travaux_estimes),
+                step=500.0,
+                help=HYPOTHESES_HELP["travaux_estimes"],
+            )
+            meubles = st.number_input(
+                "Meubles",
+                min_value=0.0,
+                value=float(hypotheses.meubles_estimes),
+                step=500.0,
+                help=HYPOTHESES_HELP["meubles_estimes"],
+                disabled=mode_location == ModeLocation.NUE,
+            )
+            frais_bancaires = st.number_input(
+                "Frais bancaires",
+                min_value=0.0,
+                value=float(hypotheses.frais_bancaires),
+                step=100.0,
+                help=HYPOTHESES_HELP["frais_bancaires"],
+            )
+            garantie = st.number_input(
+                "Garantie",
+                min_value=0.0,
+                value=float(hypotheses.garantie),
+                step=100.0,
+                help=HYPOTHESES_HELP["garantie"],
             )
 
         with frais:
             st.markdown("**Frais recurrents**")
-            assurance_pno = st.number_input("Assurance PNO", min_value=0.0, value=float(hypotheses.assurance_pno), step=20.0)
-            assurance_gli = st.number_input("Assurance GLI", min_value=0.0, value=float(hypotheses.assurance_gli), step=20.0)
+            assurance_pno = st.number_input(
+                "Assurance PNO",
+                min_value=0.0,
+                value=float(hypotheses.assurance_pno),
+                step=20.0,
+                help=HYPOTHESES_HELP["assurance_pno"],
+            )
+            assurance_gli = st.number_input(
+                "Assurance GLI",
+                min_value=0.0,
+                value=float(hypotheses.assurance_gli),
+                step=20.0,
+                help=HYPOTHESES_HELP["assurance_gli"],
+            )
+            cfe_annuelle = st.number_input(
+                "CFE annuelle",
+                min_value=0.0,
+                value=float(hypotheses.cfe_annuelle if mode_location == ModeLocation.MEUBLEE else 0.0),
+                step=50.0,
+                help=HYPOTHESES_HELP["cfe_annuelle"],
+                disabled=mode_location == ModeLocation.NUE,
+            )
             comptable_lmnp = st.number_input(
                 "Comptable LMNP",
                 min_value=0.0,
-                value=float(hypotheses.comptable_lmnp),
+                value=float(hypotheses.comptable_lmnp if regime_fiscal == RegimeFiscal.LMNP_REEL else 0.0),
                 step=50.0,
+                help=HYPOTHESES_HELP["comptable_lmnp"],
+                disabled=regime_fiscal != RegimeFiscal.LMNP_REEL,
             )
             entretien_annuel = st.number_input(
                 "Entretien annuel",
                 min_value=0.0,
                 value=float(hypotheses.entretien_annuel),
                 step=50.0,
+                help=HYPOTHESES_HELP["entretien_annuel"],
             )
             gestion_agence_possible = st.checkbox(
                 "Gestion agence possible",
                 value=bool(hypotheses.gestion_agence_possible),
+                help=HYPOTHESES_HELP["gestion_agence_possible"],
             )
 
         if st.form_submit_button("Sauvegarder les hypotheses"):
+            if charges_recup > charges_copro:
+                st.error("Les charges recuperables ne peuvent pas depasser les charges de copro annuelles.")
+                st.stop()
+            regime_sauvegarde = regime_fiscal
+            if regime_sauvegarde not in regimes_compatibles(mode_location):
+                regime_sauvegarde = regime_fiscal_recommande(mode_location, float(loyer_reference) * 12)
+                prelevements_sociaux_pct = prelevements_sociaux_par_regime(regime_sauvegarde)
             save_annonce(
                 conn,
                 annonce,
@@ -370,7 +714,7 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     frais_agence_achat=frais_agence_achat,
                     frais_notaire_estimes=frais_notaire,
                     travaux_estimes=travaux,
-                    meubles_estimes=meubles,
+                    meubles_estimes=0.0 if mode_location == ModeLocation.NUE else meubles,
                     frais_bancaires=frais_bancaires,
                     garantie=garantie,
                     loyer_hc_mensuel=loyer_reference,
@@ -380,8 +724,18 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     charges_recuperables_annuelles=charges_recup,
                     assurance_pno=assurance_pno,
                     assurance_gli=assurance_gli,
-                    comptable_lmnp=comptable_lmnp,
+                    cfe_annuelle=0.0 if mode_location == ModeLocation.NUE else cfe_annuelle,
+                    comptable_lmnp=0.0 if regime_sauvegarde != RegimeFiscal.LMNP_REEL else comptable_lmnp,
                     entretien_annuel=entretien_annuel,
+                    regime_fiscal=regime_sauvegarde,
+                    tmi_pct=tmi_pct,
+                    prelevements_sociaux_pct=prelevements_sociaux_pct,
+                    part_terrain_pct=part_terrain_pct,
+                    duree_amortissement_bien_annees=int(duree_amortissement_bien),
+                    duree_amortissement_travaux_annees=int(duree_amortissement_travaux),
+                    duree_amortissement_meubles_annees=int(duree_amortissement_meubles),
+                    abattement_micro_bic_pct=abattement_micro_bic,
+                    abattement_micro_foncier_pct=abattement_micro_foncier,
                     gestion_agence_possible=gestion_agence_possible,
                 ),
             )
@@ -566,6 +920,7 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         st.info("Selectionne une annonce.")
         return
     bien, location, _ = to_domain_models(annonce, hypotheses)
+    fiscalite = fiscalite_from_hypotheses(hypotheses)
 
     st.subheader("Simulation")
     st.caption("Les parametres peuvent bouger librement. Le moteur ne calcule qu'au clic.")
@@ -574,6 +929,7 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         location,
         hypotheses,
     )
+    signature = repr((signature, fiscalite))
     _simulation_summary(bien_simule, params, scenario_count)
 
     df_key = _simulation_state_key(annonce.id, "df")
@@ -585,7 +941,7 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         resultats = simuler_grille_annonce(
             bien=bien_simule,
             location=location_simulee,
-            fiscalite=Fiscalite(),
+            fiscalite=fiscalite,
             parametres=params,
             gestion_agence_possible=bool(hypotheses.gestion_agence_possible),
         )
