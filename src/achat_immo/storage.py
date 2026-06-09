@@ -60,7 +60,14 @@ class DatabaseConnection:
         return None
 
     def commit(self) -> None:
+        if self.is_postgres and getattr(self.raw, "autocommit", False):
+            return
         self.raw.commit()
+
+    def rollback(self) -> None:
+        if self.is_postgres and getattr(self.raw, "autocommit", False):
+            return
+        self.raw.rollback()
 
     def close(self) -> None:
         self.raw.close()
@@ -174,7 +181,7 @@ def _connect_postgres(database_url: str) -> DatabaseConnection:
             "Installe les dependances avec `uv sync`."
         ) from exc
 
-    conn = psycopg.connect(database_url, row_factory=dict_row)
+    conn = psycopg.connect(database_url, row_factory=dict_row, autocommit=True)
     return DatabaseConnection(conn, "postgres")
 
 

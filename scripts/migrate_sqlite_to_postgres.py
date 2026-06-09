@@ -70,7 +70,7 @@ def migrate(source_path: Path, target_url: str, *, replace: bool) -> dict[str, i
         reset_identity_sequences(target)
         return copied
     except Exception:
-        target.raw.rollback()
+        target.rollback()
         raise
     finally:
         source.close()
