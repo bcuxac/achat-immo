@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import psycopg
+
 from achat_immo.grids import GrilleParametres, simuler_grille_annonce
 from achat_immo.storage import (
     AnnonceRecord,
@@ -47,6 +49,38 @@ def test_facade_postgresql_convertit_les_placeholders_executemany() -> None:
     conn.executemany("INSERT INTO table_test (a, b) VALUES (?, ?)", [(1, 2)])
 
     assert calls == [("INSERT INTO table_test (a, b) VALUES (%s, %s)", [(1, 2)])]
+
+
+def test_facade_postgresql_reconnecte_apres_erreur_operationnelle() -> None:
+    calls = []
+
+    class DeadRaw:
+        def execute(self, sql, params):
+            calls.append(("dead", sql, params))
+            raise psycopg.OperationalError("connexion fermee")
+
+        def close(self):
+            calls.append(("closed",))
+
+    class HealthyRaw:
+        def execute(self, sql, params):
+            calls.append(("healthy", sql, params))
+            return "ok"
+
+    conn = DatabaseConnection(DeadRaw(), "postgres", dsn="postgresql://example")
+
+    def reconnect():
+        conn.raw = HealthyRaw()
+
+    conn._reconnect = reconnect
+
+    result = conn.execute("SELECT * FROM annonces WHERE id = ?", (1,))
+
+    assert result == "ok"
+    assert calls == [
+        ("dead", "SELECT * FROM annonces WHERE id = %s", (1,)),
+        ("healthy", "SELECT * FROM annonces WHERE id = %s", (1,)),
+    ]
 
 
 def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:

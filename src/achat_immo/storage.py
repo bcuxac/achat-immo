@@ -33,22 +33,38 @@ POSTGRES_URL_PREFIXES = ("postgresql://", "postgres://")
 class DatabaseConnection:
     """Petite facade DB-API pour garder le code metier independant du backend."""
 
-    def __init__(self, raw: Any, kind: str) -> None:
+    def __init__(self, raw: Any, kind: str, dsn: str = "") -> None:
         self.raw = raw
         self.kind = kind
+        self.dsn = dsn
 
     @property
     def is_postgres(self) -> bool:
         return self.kind == "postgres"
 
     def execute(self, sql: str, params: Iterable[Any] | Mapping[str, Any] = ()) -> Any:
-        return self.raw.execute(self._sql(sql), params)
+        prepared_sql = self._sql(sql)
+        try:
+            return self.raw.execute(prepared_sql, params)
+        except Exception as exc:
+            if not self._should_reconnect(exc):
+                raise
+            self._reconnect()
+            return self.raw.execute(prepared_sql, params)
 
     def executemany(self, sql: str, params: Iterable[Iterable[Any] | Mapping[str, Any]]) -> Any:
+        prepared_sql = self._sql(sql)
         if self.is_postgres:
-            with self.raw.cursor() as cursor:
-                return cursor.executemany(self._sql(sql), params)
-        return self.raw.executemany(self._sql(sql), params)
+            try:
+                with self.raw.cursor() as cursor:
+                    return cursor.executemany(prepared_sql, params)
+            except Exception as exc:
+                if not self._should_reconnect(exc):
+                    raise
+                self._reconnect()
+                with self.raw.cursor() as cursor:
+                    return cursor.executemany(prepared_sql, params)
+        return self.raw.executemany(prepared_sql, params)
 
     def executescript(self, script: str) -> Any:
         if not self.is_postgres:
@@ -76,6 +92,30 @@ class DatabaseConnection:
         if self.is_postgres:
             return sql.replace("?", "%s")
         return sql
+
+    def _should_reconnect(self, exc: Exception) -> bool:
+        if not self.is_postgres or not self.dsn:
+            return False
+        try:
+            import psycopg
+        except ImportError:  # pragma: no cover - psycopg est deja requis ici
+            return False
+        return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+
+    def _reconnect(self) -> None:
+        try:
+            self.raw.close()
+        except Exception:
+            pass
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:  # pragma: no cover - dependance absente seulement hors env projet
+            raise RuntimeError(
+                "La dependance psycopg est requise pour reconnecter PostgreSQL. "
+                "Installe les dependances avec `uv sync`."
+            ) from exc
+        self.raw = psycopg.connect(self.dsn, row_factory=dict_row, autocommit=True)
 
 
 def is_postgres_target(target: str | Path) -> bool:
@@ -182,7 +222,7 @@ def _connect_postgres(database_url: str) -> DatabaseConnection:
         ) from exc
 
     conn = psycopg.connect(database_url, row_factory=dict_row, autocommit=True)
-    return DatabaseConnection(conn, "postgres")
+    return DatabaseConnection(conn, "postgres", dsn=database_url)
 
 
 def init_db(conn: DatabaseConnection) -> None:
