@@ -3,9 +3,11 @@ from pathlib import Path
 from achat_immo.grids import GrilleParametres, simuler_grille_annonce
 from achat_immo.storage import (
     AnnonceRecord,
+    DatabaseConnection,
     HypothesesAchatRecord,
     fiscalite_from_hypotheses,
     get_annonce_bundle,
+    is_postgres_target,
     get_simulation_results,
     list_annonces,
     list_simulation_runs,
@@ -15,6 +17,36 @@ from achat_immo.storage import (
     to_domain_models,
 )
 from achat_immo.models import EpoqueConstruction, ModeLocation, RegimeFiscal
+
+
+def test_detecte_les_urls_postgresql() -> None:
+    assert is_postgres_target("postgresql://user:password@example.test/db")
+    assert is_postgres_target("postgres://user:password@example.test/db")
+    assert not is_postgres_target(Path("data/achat.sqlite"))
+
+
+def test_facade_postgresql_convertit_les_placeholders_executemany() -> None:
+    calls = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def executemany(self, sql, params):
+            calls.append((sql, list(params)))
+
+    class FakeRaw:
+        def cursor(self):
+            return FakeCursor()
+
+    conn = DatabaseConnection(FakeRaw(), "postgres")
+
+    conn.executemany("INSERT INTO table_test (a, b) VALUES (?, ?)", [(1, 2)])
+
+    assert calls == [("INSERT INTO table_test (a, b) VALUES (%s, %s)", [(1, 2)])]
 
 
 def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:

@@ -69,6 +69,10 @@ L'application utilise `data/achat_immo.sqlite` comme base locale. Cette base
 est la memoire vivante du projet : annonces, hypotheses, runs de simulation,
 resultats sauvegardes et decisions.
 
+Si une URL PostgreSQL est fournie via `DATABASE_URL` ou `[database].url` dans
+les secrets Streamlit, l'application utilise cette base distante a la place du
+fichier SQLite local. Ce mode est destine au deploiement cloud.
+
 Excel devient optionnel : la discussion peut se faire directement dans
 l'application via les vues annonce, simulations, comparaison et historique.
 
@@ -85,6 +89,71 @@ Workflow de l'application :
 - la decision robuste affiche mediane, P10, part viable et conditions minimales observees avant le meilleur scenario ;
 - `Comparaison` sert a comparer les meilleurs snapshots et a formaliser statut/notes ;
 - `Historique` conserve les snapshots sauvegardes pour revenir sur une analyse passee.
+
+## Deploiement gratuit pour deux utilisateurs
+
+Architecture cible :
+
+- Streamlit Community Cloud execute l'application Python depuis le depot GitHub ;
+- une base PostgreSQL gratuite, par exemple Supabase Free ou Neon Free, conserve les donnees ;
+- les secrets Streamlit portent l'URL PostgreSQL et les mots de passe applicatifs ;
+- SQLite reste le backend local par defaut pour developper et tester.
+
+Le stockage local de Streamlit Community Cloud ne doit pas etre utilise comme
+memoire durable. Le fichier `data/achat_immo.sqlite` est adapte au local, pas a
+une application cloud qui doit conserver les ecritures apres redemarrage.
+
+### Secrets Streamlit
+
+Generer un hash par utilisateur :
+
+```bash
+uv run python scripts/hash_streamlit_password.py
+```
+
+Creer localement `.streamlit/secrets.toml` a partir de
+`.streamlit/secrets.toml.example`, puis remplir :
+
+```toml
+[database]
+url = "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
+
+[auth]
+enabled = true
+
+[auth.users]
+benjamin = "pbkdf2_sha256$..."
+compagne = "pbkdf2_sha256$..."
+```
+
+Le fichier `.streamlit/secrets.toml` est ignore par Git. Sur Streamlit
+Community Cloud, coller le meme contenu dans les secrets de l'application.
+
+### Migration SQLite vers PostgreSQL
+
+Quand la base PostgreSQL est creee, migrer les donnees locales :
+
+```bash
+uv run python scripts/migrate_sqlite_to_postgres.py \
+  --source data/achat_immo.sqlite \
+  --target "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
+```
+
+Ajouter `--replace` uniquement pour vider les tables PostgreSQL avant une
+nouvelle importation initiale.
+
+### Deploiement Streamlit Cloud
+
+Parametres a renseigner dans Streamlit Community Cloud :
+
+- repository GitHub du projet ;
+- fichier principal : `app/streamlit_app.py` ;
+- version Python : compatible avec `requires-python = ">=3.13"` ;
+- secrets : bloc TOML ci-dessus.
+
+Une fois deployee, l'application tourne dans l'environnement Python cloud de
+Streamlit. Les telephones n'executent pas Python : ils affichent seulement
+l'interface web. Les ecritures vont vers PostgreSQL.
 
 ## Exemple Python
 
