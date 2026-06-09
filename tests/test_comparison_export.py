@@ -27,6 +27,27 @@ def test_score_rejette_cashflow_trop_negatif() -> None:
     assert "cashflow_trop_negatif" in score["alertes"]
 
 
+def test_score_bloque_dpe_g() -> None:
+    resultat = simuler_bien_sur_horizon(
+        bien=BienImmobilier(
+            ville="Nimes",
+            surface_m2=35,
+            prix_affiche=90_000,
+            dpe="G",
+        ),
+        location=HypothesesLocation(loyer_hc_mensuel=650, taxe_fonciere=900),
+        financement=Financement(apport=15_000, taux_credit_annuel_pct=3.6, duree_credit_annees=20),
+        fiscalite=Fiscalite(),
+        scenario=scenario_central(10),
+    )
+
+    score = scorer_bien(resultat)
+
+    assert score["score"] == 0
+    assert score["decision"] == "a_rejeter"
+    assert "dpe_g_interdit_location" in score["alertes"]
+
+
 def test_classement_et_export_csv(tmp_path: Path) -> None:
     resultat = simuler_bien_sur_horizon(
         bien=BienImmobilier(

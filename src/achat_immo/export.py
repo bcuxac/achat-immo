@@ -39,8 +39,6 @@ def resultats_to_dataframe(resultats: Iterable[ResultatSimulation]) -> pd.DataFr
                 "effort_epargne_mensuel": resultat.effort_epargne_mensuel,
                 "tri_annuel_approx_pct": resultat.tri_annuel_approx_pct,
                 "patrimoine_net_horizon": resultat.patrimoine_net_horizon,
-                "alternative_horizon": resultat.alternative_horizon,
-                "ecart_vs_alternative": resultat.ecart_vs_alternative,
                 "score": score["score"],
                 "decision": score["decision"],
                 "alertes": ", ".join(score["alertes"]),

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from achat_immo.diagnostics import DiagnosticItem, DiagnosticStatus
 from achat_immo.models import ResultatSimulation
 
 
@@ -19,6 +21,7 @@ class SeuilsDecision:
 def scorer_bien(
     resultat: ResultatSimulation,
     seuils: SeuilsDecision | None = None,
+    diagnostics: Sequence[DiagnosticItem] = (),
 ) -> dict[str, object]:
     """Score interpretable sur 100 points."""
 
@@ -38,15 +41,30 @@ def scorer_bien(
     elif resultat.cashflow_mensuel_apres_impot < seuils.cashflow_mensuel_cible:
         score -= 10
         alertes.append("cashflow_negatif")
-    if resultat.bien.dpe and resultat.bien.dpe.upper()[:1] in seuils.dpe_a_eviter:
+    dpe = (resultat.bien.dpe or "").upper()[:1]
+    if dpe == "G":
+        score = 0
+        alertes.append("dpe_g_interdit_location")
+    elif dpe in seuils.dpe_a_eviter:
         score -= 20
         alertes.append("dpe_a_risque")
-    if resultat.ecart_vs_alternative is not None and resultat.ecart_vs_alternative < 0:
-        score -= 10
-        alertes.append("alternative_financiere_superieure")
+
+    for item in diagnostics:
+        if item.status == DiagnosticStatus.OK:
+            continue
+        if item.code not in alertes:
+            alertes.append(item.code)
+        if item.status == DiagnosticStatus.BLOCKING:
+            score = 0
+        elif item.status == DiagnosticStatus.MISSING:
+            score -= 15
+        elif item.status == DiagnosticStatus.WARNING:
+            score -= 10
 
     score = max(score, 0)
-    if score >= 75 and not alertes:
+    if any(item.status == DiagnosticStatus.BLOCKING for item in diagnostics) or "dpe_g_interdit_location" in alertes:
+        decision = "a_rejeter"
+    elif score >= 75 and not alertes:
         decision = "interessant"
     elif score >= 55:
         decision = "a_creuser"

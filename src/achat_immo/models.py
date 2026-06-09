@@ -21,6 +21,23 @@ class TypeBien(StrEnum):
     AUTRE = "autre"
 
 
+class ModeLocation(StrEnum):
+    """Mode de location envisage pour le bien."""
+
+    NUE = "nue"
+    MEUBLEE = "meublee"
+
+
+class EpoqueConstruction(StrEnum):
+    """Tranches utilisees par les dispositifs locaux d'encadrement."""
+
+    AVANT_1946 = "avant_1946"
+    DE_1946_1970 = "1946_1970"
+    DE_1971_1990 = "1971_1990"
+    APRES_1990 = "apres_1990"
+    INCONNUE = "inconnue"
+
+
 class RegimeFiscal(StrEnum):
     """Regimes fiscaux modelises."""
 
@@ -55,6 +72,8 @@ class BienImmobilier:
     nb_pieces: int | None = None
     etage: str | None = None
     dpe: str | None = None
+    epoque_construction: EpoqueConstruction = EpoqueConstruction.INCONNUE
+    secteur_encadrement: str = ""
     frais_agence_achat: float = 0.0
     frais_notaire_estimes: float = 0.0
     travaux_estimes: float = 0.0
@@ -76,6 +95,8 @@ class BienImmobilier:
             _must_be_non_negative(name, getattr(self, name))
         if self.prix_negocie is not None:
             _must_be_positive("prix_negocie", self.prix_negocie)
+        if self.nb_pieces is not None and self.nb_pieces <= 0:
+            raise ValueError("nb_pieces doit etre strictement positif.")
 
     @property
     def prix_achat(self) -> float:
@@ -107,6 +128,7 @@ class HypothesesLocation:
     """Hypotheses d'exploitation locative, prudentes par defaut."""
 
     loyer_hc_mensuel: float
+    mode_location: ModeLocation = ModeLocation.MEUBLEE
     charges_recuperables_mensuelles: float = 0.0
     vacance_mois_par_an: float = 1.0
     evolution_loyer_annuelle_pct: float = 0.0
@@ -214,20 +236,6 @@ class Fiscalite:
 
 
 @dataclass(slots=True)
-class AlternativeInvestissement:
-    """Parametres d'opportunite pour ETF World/Nasdaq/PEA."""
-
-    rendement_annuel_pct: float = 8.0
-    versement_mensuel_reference: float = 0.0
-    fiscalite_plus_value_pct: float = 0.0
-
-    def __post_init__(self) -> None:
-        _must_be_non_negative("versement_mensuel_reference", self.versement_mensuel_reference)
-        if self.fiscalite_plus_value_pct < 0 or self.fiscalite_plus_value_pct > 100:
-            raise ValueError("fiscalite_plus_value_pct doit etre comprise entre 0 et 100.")
-
-
-@dataclass(slots=True)
 class Scenario:
     """Scenario de marche et d'exploitation applique a un bien."""
 
@@ -268,8 +276,6 @@ class ResultatSimulation:
     effort_epargne_mensuel: float
     tri_annuel_approx_pct: float | None
     patrimoine_net_horizon: float
-    alternative_horizon: float | None
-    ecart_vs_alternative: float | None
     projection_annuelle: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -283,6 +289,4 @@ class ResultatSimulation:
             "effort_epargne_mensuel": self.effort_epargne_mensuel,
             "tri_annuel_approx_pct": self.tri_annuel_approx_pct,
             "patrimoine_net_horizon": self.patrimoine_net_horizon,
-            "alternative_horizon": self.alternative_horizon,
-            "ecart_vs_alternative": self.ecart_vs_alternative,
         }

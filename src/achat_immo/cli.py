@@ -9,7 +9,6 @@ import pandas as pd
 
 from achat_immo.export import export_csv, export_excel
 from achat_immo.models import (
-    AlternativeInvestissement,
     BienImmobilier,
     Financement,
     Fiscalite,
@@ -92,7 +91,6 @@ def main() -> None:
     parser.add_argument("annonces", type=Path, help="CSV d'annonces a analyser")
     parser.add_argument("--output", type=Path, default=Path("outputs/comparaison_scenarios.xlsx"))
     parser.add_argument("--horizon", type=int, default=20)
-    parser.add_argument("--rendement-alt", type=float, default=8.0)
     args = parser.parse_args()
 
     resultats = []
@@ -104,7 +102,6 @@ def main() -> None:
                 financement=financement,
                 fiscalite=Fiscalite(),
                 scenario=scenario_central(args.horizon),
-                alternative=AlternativeInvestissement(rendement_annuel_pct=args.rendement_alt),
             )
         )
 
