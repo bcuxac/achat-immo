@@ -14,8 +14,10 @@ import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
+SRC_PATH_STR = str(SRC_PATH)
+if SRC_PATH_STR in sys.path:
+    sys.path.remove(SRC_PATH_STR)
+sys.path.insert(0, SRC_PATH_STR)
 
 from achat_immo.auth import verify_password
 from achat_immo.grids import (
@@ -290,9 +292,17 @@ def derived_fiscalite_values(regime_fiscal: RegimeFiscal) -> dict[str, float | b
         "prelevements_sociaux_pct": prelevements_sociaux_par_regime(regime_fiscal),
         "abattement_micro_bic_pct": defaults.abattement_micro_bic_pct,
         "abattement_micro_foncier_pct": defaults.abattement_micro_foncier_pct,
-        "taux_impot_plus_value_pct": defaults.taux_impot_plus_value_pct,
-        "taux_prelevements_sociaux_plus_value_pct": defaults.taux_prelevements_sociaux_plus_value_pct,
-        "reintegrer_amortissements_lmnp_plus_value": defaults.reintegrer_amortissements_lmnp_plus_value,
+        "taux_impot_plus_value_pct": getattr(defaults, "taux_impot_plus_value_pct", 19.0),
+        "taux_prelevements_sociaux_plus_value_pct": getattr(
+            defaults,
+            "taux_prelevements_sociaux_plus_value_pct",
+            17.2,
+        ),
+        "reintegrer_amortissements_lmnp_plus_value": getattr(
+            defaults,
+            "reintegrer_amortissements_lmnp_plus_value",
+            True,
+        ),
     }
 
 
