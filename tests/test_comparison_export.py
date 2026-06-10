@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pandas as pd
+
 from achat_immo.comparison import classer_biens, scorer_bien
 from achat_immo.export import export_csv, export_excel
 from achat_immo.models import BienImmobilier, Financement, Fiscalite, HypothesesLocation
@@ -87,3 +89,5 @@ def test_export_excel(tmp_path: Path) -> None:
     output = export_excel([resultat], tmp_path / "comparaison.xlsx")
 
     assert output.exists()
+    workbook = pd.ExcelFile(output)
+    assert {"Credit", "Fiscalite annuelle", "Amortissements fiscaux"}.issubset(set(workbook.sheet_names))

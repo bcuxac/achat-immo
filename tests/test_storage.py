@@ -171,13 +171,16 @@ def test_sqlite_sauvegarde_run_de_simulation(tmp_path: Path) -> None:
     runs = list_simulation_runs(conn, annonce_id)
     rows = get_simulation_results(conn, run_id)
 
-    assert runs[0]["nb_resultats"] == 1
+    assert runs[0]["nb_resultats"] == 2
     assert runs[0]["commentaire"] == "scenario initial"
     assert rows[0]["prix_achat"] == 90_000
     assert rows[0]["cout_total_projet"] == 90_000
     assert rows[0]["loyer_hc_mensuel"] == 620
     assert rows[0]["montant_emprunte"] > 0
     assert rows[0]["frais_gestion_pct"] == 0.0
+    assert rows[0]["mode_location"] == "meublee"
+    assert rows[0]["regime_fiscal"] in {"lmnp_reel", "micro_bic"}
+    assert "patrimoine_net_sortie" in rows[0]
     assert rows[0]["decision"] in {"interessant", "a_creuser", "a_rejeter"}
     assert "ecart_vs_alternative" not in rows[0]
 

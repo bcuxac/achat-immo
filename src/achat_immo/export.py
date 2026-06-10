@@ -29,6 +29,8 @@ def resultats_to_dataframe(resultats: Iterable[ResultatSimulation]) -> pd.DataFr
                 "prix_m2": resultat.bien.prix_m2,
                 "cout_total_projet": resultat.cout_total_projet,
                 "scenario": resultat.scenario.nom,
+                "mode_location": resultat.mode_location.value if resultat.mode_location else "",
+                "regime_fiscal": resultat.regime_fiscal.value if resultat.regime_fiscal else "",
                 "montant_emprunte": resultat.montant_emprunte,
                 "mensualite_totale": resultat.mensualite_totale,
                 "rendement_brut_pct": resultat.rendement_brut_pct,
@@ -38,7 +40,16 @@ def resultats_to_dataframe(resultats: Iterable[ResultatSimulation]) -> pd.DataFr
                 "cashflow_mensuel_apres_impot": resultat.cashflow_mensuel_apres_impot,
                 "effort_epargne_mensuel": resultat.effort_epargne_mensuel,
                 "tri_annuel_approx_pct": resultat.tri_annuel_approx_pct,
+                "tri_annuel_pct": resultat.tri_annuel_pct,
+                "van": resultat.van,
+                "cash_on_cash_return_pct": resultat.cash_on_cash_return_pct,
+                "cashflow_cumule_horizon": resultat.cashflow_cumule_horizon,
                 "patrimoine_net_horizon": resultat.patrimoine_net_horizon,
+                "patrimoine_net_sortie": resultat.patrimoine_net_sortie,
+                "impots_total_horizon": resultat.impots_total_horizon,
+                "impot_plus_value": resultat.impot_plus_value,
+                "break_even_year": resultat.break_even_year,
+                "nb_annees_cashflow_negatif": resultat.nb_annees_cashflow_negatif,
                 "score": score["score"],
                 "decision": score["decision"],
                 "alertes": ", ".join(score["alertes"]),
@@ -49,6 +60,16 @@ def resultats_to_dataframe(resultats: Iterable[ResultatSimulation]) -> pd.DataFr
 
 def projection_to_dataframe(resultat: ResultatSimulation) -> pd.DataFrame:
     df = pd.DataFrame(resultat.projection_annuelle)
+    df.insert(0, "scenario", resultat.scenario.nom)
+    df.insert(0, "ville", resultat.bien.ville)
+    df.insert(1, "quartier", resultat.bien.quartier)
+    return df
+
+
+def _detail_to_dataframe(resultat: ResultatSimulation, rows: list[dict[str, object]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
     df.insert(0, "scenario", resultat.scenario.nom)
     df.insert(0, "ville", resultat.bien.ville)
     df.insert(1, "quartier", resultat.bien.quartier)
@@ -80,6 +101,33 @@ def export_excel(resultats: Iterable[ResultatSimulation], path: str | Path) -> P
                 else pd.DataFrame()
             )
             projections.to_excel(writer, sheet_name="Projections", index=False)
+            credits = (
+                pd.concat(
+                    [_detail_to_dataframe(resultat, resultat.credit_annuel) for resultat in resultats],
+                    ignore_index=True,
+                )
+                if resultats
+                else pd.DataFrame()
+            )
+            credits.to_excel(writer, sheet_name="Credit", index=False)
+            fiscalites = (
+                pd.concat(
+                    [_detail_to_dataframe(resultat, resultat.fiscalite_annuelle) for resultat in resultats],
+                    ignore_index=True,
+                )
+                if resultats
+                else pd.DataFrame()
+            )
+            fiscalites.to_excel(writer, sheet_name="Fiscalite annuelle", index=False)
+            amortissements = (
+                pd.concat(
+                    [_detail_to_dataframe(resultat, resultat.amortissements_fiscaux) for resultat in resultats],
+                    ignore_index=True,
+                )
+                if resultats
+                else pd.DataFrame()
+            )
+            amortissements.to_excel(writer, sheet_name="Amortissements fiscaux", index=False)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "L'export Excel necessite openpyxl. Installe-le avec `uv add openpyxl`."

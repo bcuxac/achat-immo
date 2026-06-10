@@ -3,6 +3,8 @@ from achat_immo.models import (
     Financement,
     Fiscalite,
     HypothesesLocation,
+    ModeLocation,
+    RegimeFiscal,
     TypeBien,
 )
 from achat_immo.scenarios import (
@@ -64,3 +66,23 @@ def test_simulation_sur_plusieurs_horizons() -> None:
 
     assert [r.scenario.horizon_annees for r in resultats] == [5, 10]
     assert [len(r.projection_annuelle) for r in resultats] == [6, 11]
+
+
+def test_location_nue_neutralise_le_budget_meubles_saisi() -> None:
+    resultat = simuler_bien_sur_horizon(
+        bien=_bien_grenoble(),
+        location=HypothesesLocation(
+            mode_location=ModeLocation.NUE,
+            loyer_hc_mensuel=650,
+            taxe_fonciere=900,
+            cfe_annuelle=400,
+            comptable_lmnp=600,
+        ),
+        financement=Financement(apport=18_000),
+        fiscalite=Fiscalite(regime=RegimeFiscal.LOCATION_NUE_REEL),
+        scenario=scenario_central(horizon_annees=5),
+    )
+
+    assert resultat.mode_location == ModeLocation.NUE
+    assert resultat.bien.meubles_estimes == 0.0
+    assert resultat.cout_total_projet == 123_800

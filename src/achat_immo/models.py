@@ -210,8 +210,17 @@ class Fiscalite:
     duree_amortissement_bien_annees: int = 30
     duree_amortissement_travaux_annees: int = 15
     duree_amortissement_meubles_annees: int = 7
+    duree_amortissement_frais_acquisition_annees: int = 5
+    option_frais_acquisition: str = "amortir_5_ans"
+    option_frais_emprunt: str = "deduire_annee_1"
     abattement_micro_bic_pct: float = 50.0
     abattement_micro_foncier_pct: float = 30.0
+    seuil_micro_bic: float = 77_700.0
+    seuil_micro_foncier: float = 15_000.0
+    taux_impot_plus_value_pct: float = 19.0
+    taux_prelevements_sociaux_plus_value_pct: float = 17.2
+    reintegrer_amortissements_lmnp_plus_value: bool = True
+    surtaxe_plus_value_active: bool = True
 
     def __post_init__(self) -> None:
         for name in (
@@ -220,6 +229,8 @@ class Fiscalite:
             "part_terrain_pct",
             "abattement_micro_bic_pct",
             "abattement_micro_foncier_pct",
+            "taux_impot_plus_value_pct",
+            "taux_prelevements_sociaux_plus_value_pct",
         ):
             value = getattr(self, name)
             if not 0 <= value <= 100:
@@ -228,9 +239,16 @@ class Fiscalite:
             "duree_amortissement_bien_annees",
             "duree_amortissement_travaux_annees",
             "duree_amortissement_meubles_annees",
+            "duree_amortissement_frais_acquisition_annees",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} doit etre strictement positif.")
+        for name in ("seuil_micro_bic", "seuil_micro_foncier"):
+            _must_be_non_negative(name, getattr(self, name))
+        if self.option_frais_acquisition not in {"amortir_5_ans", "deduire_annee_1"}:
+            raise ValueError("option_frais_acquisition doit valoir 'amortir_5_ans' ou 'deduire_annee_1'.")
+        if self.option_frais_emprunt not in {"deduire_annee_1", "etaler"}:
+            raise ValueError("option_frais_emprunt doit valoir 'deduire_annee_1' ou 'etaler'.")
 
     @property
     def taux_global_imposition_pct(self) -> float:
@@ -248,6 +266,7 @@ class Scenario:
     charges_multiplicateur: float = 1.0
     vacance_mois_par_an: float | None = None
     frais_revente_pct: float = 7.0
+    taux_actualisation_pct: float = 4.0
 
     def __post_init__(self) -> None:
         if self.horizon_annees <= 0:
@@ -255,6 +274,7 @@ class Scenario:
         _must_be_positive("loyer_multiplicateur", self.loyer_multiplicateur)
         _must_be_positive("charges_multiplicateur", self.charges_multiplicateur)
         _must_be_non_negative("frais_revente_pct", self.frais_revente_pct)
+        _must_be_non_negative("taux_actualisation_pct", self.taux_actualisation_pct)
         if self.vacance_mois_par_an is not None and not 0 <= self.vacance_mois_par_an <= 12:
             raise ValueError("vacance_mois_par_an doit etre entre 0 et 12.")
 
@@ -279,6 +299,22 @@ class ResultatSimulation:
     tri_annuel_approx_pct: float | None
     patrimoine_net_horizon: float
     projection_annuelle: list[dict[str, Any]] = field(default_factory=list)
+    mode_location: ModeLocation | None = None
+    regime_fiscal: RegimeFiscal | None = None
+    tri_annuel_pct: float | None = None
+    van: float | None = None
+    cash_on_cash_return_pct: float | None = None
+    cashflow_cumule_horizon: float = 0.0
+    patrimoine_net_sortie: float = 0.0
+    flux_sortie_net: float = 0.0
+    impot_plus_value: float = 0.0
+    impots_total_horizon: float = 0.0
+    break_even_year: int | None = None
+    nb_annees_cashflow_negatif: int = 0
+    fiscalite_annuelle: list[dict[str, Any]] = field(default_factory=list)
+    amortissements_fiscaux: list[dict[str, Any]] = field(default_factory=list)
+    credit_annuel: list[dict[str, Any]] = field(default_factory=list)
+    plus_value: dict[str, Any] = field(default_factory=dict)
 
     @property
     def indicateurs(self) -> dict[str, float | None]:
@@ -290,5 +326,11 @@ class ResultatSimulation:
             "cashflow_mensuel_apres_impot": self.cashflow_mensuel_apres_impot,
             "effort_epargne_mensuel": self.effort_epargne_mensuel,
             "tri_annuel_approx_pct": self.tri_annuel_approx_pct,
+            "tri_annuel_pct": self.tri_annuel_pct,
+            "van": self.van,
+            "cash_on_cash_return_pct": self.cash_on_cash_return_pct,
             "patrimoine_net_horizon": self.patrimoine_net_horizon,
+            "patrimoine_net_sortie": self.patrimoine_net_sortie,
+            "impot_plus_value": self.impot_plus_value,
+            "cashflow_cumule_horizon": self.cashflow_cumule_horizon,
         }

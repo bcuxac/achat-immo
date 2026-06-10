@@ -24,6 +24,14 @@ def _round_euros(value: float) -> float:
     return round(value, 2)
 
 
+def taux_mensuel_effectif(taux_annuel_pct: float) -> float:
+    """Convertit un taux annuel effectif en taux mensuel equivalent."""
+
+    if taux_annuel_pct < 0:
+        raise ValueError("taux_annuel_pct doit etre positif ou nul.")
+    return (1 + taux_annuel_pct / 100) ** (1 / 12) - 1
+
+
 def calcul_mensualite(montant: float, taux_annuel_pct: float, duree_annees: int) -> float:
     """Mensualite hors assurance d'un pret amortissable."""
 
@@ -37,7 +45,7 @@ def calcul_mensualite(montant: float, taux_annuel_pct: float, duree_annees: int)
         return 0.0
 
     nb_mois = duree_annees * 12
-    taux_mensuel = taux_annuel_pct / 100 / 12
+    taux_mensuel = taux_mensuel_effectif(taux_annuel_pct)
     if taux_mensuel == 0:
         return _round_euros(montant / nb_mois)
 
@@ -74,7 +82,7 @@ def capital_restant_du(
         return 0.0
 
     mensualite = calcul_mensualite(montant, taux_annuel_pct, duree_annees)
-    taux_mensuel = taux_annuel_pct / 100 / 12
+    taux_mensuel = taux_mensuel_effectif(taux_annuel_pct)
     if taux_mensuel == 0:
         crd = montant * (1 - mois_ecoules / nb_mois)
     else:
@@ -106,7 +114,7 @@ def tableau_amortissement(
     nb_mois = duree_annees * 12
     mensualite = calcul_mensualite(montant, taux_annuel_pct, duree_annees)
     assurance = mensualite_assurance(montant, assurance_annuelle_pct)
-    taux_mensuel = taux_annuel_pct / 100 / 12
+    taux_mensuel = taux_mensuel_effectif(taux_annuel_pct)
     crd = _round_euros(montant)
     echeances: list[EcheancePret] = []
 
@@ -144,3 +152,43 @@ def interets_par_annee(echeances: list[EcheancePret]) -> dict[int, float]:
     for echeance in echeances:
         resultats[echeance.annee] = resultats.get(echeance.annee, 0.0) + echeance.interets
     return {annee: _round_euros(total) for annee, total in resultats.items()}
+
+
+def credit_par_annee(echeances: list[EcheancePret]) -> list[dict[str, float]]:
+    """Agrege un tableau mensuel en lignes annuelles lisibles."""
+
+    resultats: dict[int, dict[str, float]] = {}
+    for echeance in echeances:
+        row = resultats.setdefault(
+            echeance.annee,
+            {
+                "annee": float(echeance.annee),
+                "mensualite_credit": 0.0,
+                "interets": 0.0,
+                "capital": 0.0,
+                "assurance": 0.0,
+                "mensualite_totale": 0.0,
+                "crd_debut": echeance.crd_avant,
+                "crd_fin": echeance.crd_apres,
+            },
+        )
+        row["mensualite_credit"] += echeance.mensualite_credit
+        row["interets"] += echeance.interets
+        row["capital"] += echeance.capital
+        row["assurance"] += echeance.assurance
+        row["mensualite_totale"] += echeance.mensualite_totale
+        row["crd_fin"] = echeance.crd_apres
+
+    return [
+        {
+            "annee": int(row["annee"]),
+            "mensualite_credit": _round_euros(row["mensualite_credit"]),
+            "interets": _round_euros(row["interets"]),
+            "capital": _round_euros(row["capital"]),
+            "assurance": _round_euros(row["assurance"]),
+            "mensualite_totale": _round_euros(row["mensualite_totale"]),
+            "crd_debut": _round_euros(row["crd_debut"]),
+            "crd_fin": _round_euros(row["crd_fin"]),
+        }
+        for _, row in sorted(resultats.items())
+    ]

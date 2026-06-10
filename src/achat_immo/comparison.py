@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from achat_immo.diagnostics import DiagnosticItem, DiagnosticStatus
-from achat_immo.models import ResultatSimulation
+from achat_immo.models import RegimeFiscal, ResultatSimulation
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +41,14 @@ def scorer_bien(
     elif resultat.cashflow_mensuel_apres_impot < seuils.cashflow_mensuel_cible:
         score -= 10
         alertes.append("cashflow_negatif")
+    if resultat.regime_fiscal == RegimeFiscal.LMNP_REEL:
+        score -= 5
+        alertes.append("complexite_lmnp_reel")
+    elif resultat.regime_fiscal == RegimeFiscal.LOCATION_NUE_REEL:
+        score -= 3
+        alertes.append("complexite_nue_reel")
+    elif resultat.regime_fiscal in {RegimeFiscal.MICRO_BIC, RegimeFiscal.MICRO_FONCIER}:
+        score -= 1
     dpe = (resultat.bien.dpe or "").upper()[:1]
     if dpe == "G":
         score = 0

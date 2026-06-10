@@ -1,5 +1,13 @@
 from achat_immo.models import BienImmobilier, Fiscalite, RegimeFiscal, TypeBien
-from achat_immo.taxes import amortissement_lmnp, fiscalite_lmnp_reel, resultat_fiscal
+from achat_immo.taxes import (
+    EtatFiscal,
+    abattement_plus_value_ir_pct,
+    abattement_plus_value_ps_pct,
+    amortissement_lmnp,
+    calcul_plus_value,
+    fiscalite_lmnp_reel,
+    resultat_fiscal,
+)
 
 
 def test_amortissement_lmnp_separe_bien_travaux_meubles() -> None:
@@ -47,3 +55,109 @@ def test_routeur_micro_bic() -> None:
     assert resultat.regime == RegimeFiscal.MICRO_BIC
     assert resultat.resultat_fiscal == 3_000
     assert resultat.impot == 1_458
+
+
+def test_lmnp_reel_reporte_deficit_et_amortissements() -> None:
+    bien = BienImmobilier(
+        ville="Nimes",
+        surface_m2=40,
+        prix_affiche=100_000,
+        type_bien=TypeBien.T2,
+        frais_notaire_estimes=8_000,
+        travaux_estimes=15_000,
+        meubles_estimes=7_000,
+    )
+    fiscalite = Fiscalite(tmi_pct=30, prelevements_sociaux_pct=18.6)
+    etat = EtatFiscal()
+
+    annee_1 = resultat_fiscal(
+        bien=bien,
+        revenus=5_000,
+        charges_deductibles=9_000,
+        interets=2_000,
+        fiscalite=fiscalite,
+        annee=1,
+        etat=etat,
+    )
+    annee_2 = resultat_fiscal(
+        bien=bien,
+        revenus=12_000,
+        charges_deductibles=1_000,
+        interets=1_000,
+        fiscalite=fiscalite,
+        annee=2,
+        etat=etat,
+    )
+
+    assert annee_1.deficit_genere == 6_000
+    assert annee_1.amortissement_utilise == 0
+    assert annee_1.amortissement_report_fin > 0
+    assert annee_2.deficit_utilise == 6_000
+    assert annee_2.amortissement_utilise == 4_000
+    assert annee_2.resultat_fiscal == 0
+    assert annee_2.amortissement_report_fin > annee_1.amortissement_report_fin
+
+
+def test_location_nue_reel_sans_amortissement_et_micro_foncier() -> None:
+    bien = BienImmobilier(ville="Nimes", surface_m2=30, prix_affiche=80_000)
+    fiscalite_nue = Fiscalite(regime=RegimeFiscal.LOCATION_NUE_REEL, tmi_pct=30, prelevements_sociaux_pct=17.2)
+    fiscalite_micro = Fiscalite(regime=RegimeFiscal.MICRO_FONCIER, tmi_pct=30, prelevements_sociaux_pct=17.2)
+
+    nue = resultat_fiscal(
+        bien=bien,
+        revenus=6_000,
+        charges_deductibles=2_000,
+        interets=1_000,
+        fiscalite=fiscalite_nue,
+    )
+    micro = resultat_fiscal(
+        bien=bien,
+        revenus=6_000,
+        charges_deductibles=2_000,
+        interets=1_000,
+        fiscalite=fiscalite_micro,
+    )
+
+    assert nue.amortissement == 0
+    assert nue.resultat_fiscal == 3_000
+    assert micro.charges_deductibles == 1_800
+    assert micro.resultat_fiscal == 4_200
+
+
+def test_plus_value_abattements_et_reintegration_lmnp() -> None:
+    bien = BienImmobilier(
+        ville="Nimes",
+        surface_m2=40,
+        prix_affiche=100_000,
+        frais_notaire_estimes=8_000,
+        travaux_estimes=15_000,
+    )
+    fiscalite = Fiscalite()
+
+    assert abattement_plus_value_ir_pct(5) == 0
+    assert abattement_plus_value_ir_pct(22) == 100
+    assert abattement_plus_value_ps_pct(30) == 100
+
+    plus_value = calcul_plus_value(
+        bien=bien,
+        fiscalite=fiscalite,
+        regime=RegimeFiscal.LMNP_REEL,
+        valeur_bien=160_000,
+        duree_detention_annees=10,
+        frais_revente_pct=0.0,
+        amortissements_lmnp_deduits_plus_value=10_000,
+    )
+    moins_value = calcul_plus_value(
+        bien=bien,
+        fiscalite=fiscalite,
+        regime=RegimeFiscal.MICRO_BIC,
+        valeur_bien=90_000,
+        duree_detention_annees=10,
+        frais_revente_pct=0.0,
+    )
+
+    assert plus_value.prix_acquisition_fiscal == 113_000
+    assert plus_value.plus_value_brute == 47_000
+    assert plus_value.abattement_ir_pct == 30
+    assert plus_value.impot_total == 13_668.07
+    assert moins_value.impot_total == 0

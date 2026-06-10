@@ -30,5 +30,9 @@ dev = [
 pythonpath = ["src"]
 testpaths = ["tests"]
 
+[tool.ruff.lint.per-file-ignores]
+"app/*.py" = ["E402"]
+"scripts/*.py" = ["E402"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/achat_immo"]

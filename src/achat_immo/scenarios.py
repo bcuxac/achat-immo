@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from achat_immo.cashflow import (
     appliquer_scenario_location,
@@ -12,16 +13,18 @@ from achat_immo.cashflow import (
     revenus_annuels_hc,
     total_charges_annuelles,
 )
-from achat_immo.loan import tableau_amortissement
+from achat_immo.loan import credit_par_annee, tableau_amortissement
 from achat_immo.models import (
     BienImmobilier,
     Financement,
     Fiscalite,
     HypothesesLocation,
+    ModeLocation,
+    RegimeFiscal,
     ResultatSimulation,
     Scenario,
 )
-from achat_immo.taxes import resultat_fiscal
+from achat_immo.taxes import EtatFiscal, calcul_plus_value, resultat_fiscal
 
 
 def scenario_central(horizon_annees: int = 20) -> Scenario:
@@ -99,6 +102,11 @@ def _tri_annuel_approx(flux: Sequence[float]) -> float | None:
     return (bas + haut) / 2
 
 
+def _van(flux: Sequence[float], taux_actualisation_pct: float) -> float:
+    taux = taux_actualisation_pct / 100
+    return round(sum(flux_t / (1 + taux) ** index for index, flux_t in enumerate(flux)), 2)
+
+
 def simuler_bien_sur_horizon(
     bien: BienImmobilier,
     location: HypothesesLocation,
@@ -111,6 +119,12 @@ def simuler_bien_sur_horizon(
     fiscalite = fiscalite or Fiscalite()
     scenario = scenario or scenario_central()
     location_scenario = appliquer_scenario_location(location, scenario)
+    if fiscalite.regime != RegimeFiscal.LMNP_REEL and location_scenario.comptable_lmnp:
+        location_scenario = replace(location_scenario, comptable_lmnp=0.0)
+    if location_scenario.mode_location == ModeLocation.NUE and location_scenario.cfe_annuelle:
+        location_scenario = replace(location_scenario, cfe_annuelle=0.0)
+    if location_scenario.mode_location == ModeLocation.NUE and bien.meubles_estimes:
+        bien = replace(bien, meubles_estimes=0.0)
     montant_emprunte = financement.montant_emprunte(bien.cout_total_projet)
     echeances = tableau_amortissement(
         montant=montant_emprunte,
@@ -121,10 +135,19 @@ def simuler_bien_sur_horizon(
     mensualite_credit = echeances[0].mensualite_credit if echeances else 0.0
     mensualite_assurance = echeances[0].assurance if echeances else 0.0
     mensualite_totale = echeances[0].mensualite_totale if echeances else 0.0
+    credit_annuel = credit_par_annee(echeances)
+    credit_par_annee_map = {row["annee"]: row for row in credit_annuel}
 
     projection: list[dict[str, float]] = []
+    fiscalite_annuelle: list[dict[str, float | str | bool]] = []
+    amortissements_fiscaux: list[dict[str, float | str]] = []
     cashflow_cumule = 0.0
+    impots_total_horizon = 0.0
+    amortissements_lmnp_deduits_plus_value = 0.0
+    break_even_year: int | None = None
+    nb_annees_cashflow_negatif = 0
     flux_tri = [-financement.apport]
+    etat_fiscal = EtatFiscal()
 
     projection.append(
         {
@@ -152,13 +175,21 @@ def simuler_bien_sur_horizon(
     )
 
     for annee in range(1, scenario.horizon_annees + 1):
-        echeances_annee = [e for e in echeances if e.annee == annee]
-        interets = round(sum(e.interets for e in echeances_annee), 2)
-        assurance_credit = round(sum(e.assurance for e in echeances_annee), 2)
-        mensualites_totales = round(sum(e.mensualite_totale for e in echeances_annee), 2)
+        credit_annee = credit_par_annee_map.get(
+            annee,
+            {
+                "interets": 0.0,
+                "assurance": 0.0,
+                "mensualite_totale": 0.0,
+                "crd_fin": 0.0,
+            },
+        )
+        interets = float(credit_annee["interets"])
+        assurance_credit = float(credit_annee["assurance"])
+        mensualites_totales = float(credit_annee["mensualite_totale"])
         crd = (
-            echeances[min(annee * 12, len(echeances)) - 1].crd_apres
-            if echeances and annee * 12 <= len(echeances)
+            float(credit_annee["crd_fin"])
+            if annee in credit_par_annee_map
             else 0.0
         )
         revenus = revenus_annuels_hc(location_scenario, annee)
@@ -170,14 +201,61 @@ def simuler_bien_sur_horizon(
             charges_deductibles=total_charges,
             interets=interets,
             fiscalite=fiscalite,
+            annee=annee,
+            etat=etat_fiscal,
+            mode_location=location_scenario.mode_location,
         )
         cashflow_avant_impot = round(revenus - total_charges - mensualites_totales, 2)
         cashflow_apres_impot = round(revenus - total_charges - mensualites_totales - fiscal.impot, 2)
         cashflow_cumule = round(cashflow_cumule + cashflow_apres_impot, 2)
+        impots_total_horizon = round(impots_total_horizon + fiscal.impot, 2)
+        amortissements_lmnp_deduits_plus_value = round(
+            amortissements_lmnp_deduits_plus_value + fiscal.amortissement_deduit_plus_value,
+            2,
+        )
+        if cashflow_apres_impot < 0:
+            nb_annees_cashflow_negatif += 1
+        if break_even_year is None and cashflow_cumule >= 0:
+            break_even_year = annee
         valeur = _valeur_bien(bien, scenario, annee)
         valeur_nette_revente = round(valeur * (1 - scenario.frais_revente_pct / 100), 2)
         patrimoine_hors_cashflow = round(valeur_nette_revente - crd, 2)
         patrimoine_net = round(patrimoine_hors_cashflow + cashflow_cumule, 2)
+        fiscalite_annuelle.append(
+            {
+                "annee": annee,
+                "regime": fiscal.regime.value,
+                "revenus": fiscal.revenus,
+                "charges_retenues": fiscal.charges_deductibles,
+                "interets": fiscal.interets,
+                "frais_deductibles_exceptionnels": fiscal.frais_deductibles_exceptionnels,
+                "base_avant_amortissement": fiscal.resultat_avant_amortissement,
+                "amortissement": fiscal.amortissement,
+                "amortissement_utilise": fiscal.amortissement_utilise,
+                "amortissement_report_fin": fiscal.amortissement_report_fin,
+                "deficit_utilise": fiscal.deficit_utilise,
+                "deficit_genere": fiscal.deficit_genere,
+                "deficit_report_fin": fiscal.deficit_report_fin,
+                "resultat_imposable": fiscal.resultat_fiscal,
+                "impot": fiscal.impot,
+                "eligible": fiscal.eligible,
+                "avertissements": ", ".join(fiscal.avertissements),
+            }
+        )
+        amortissements_fiscaux.append(
+            {
+                "annee": annee,
+                "regime": fiscal.regime.value,
+                "bati": fiscal.amortissement_bati,
+                "travaux": fiscal.amortissement_travaux,
+                "meubles": fiscal.amortissement_meubles,
+                "frais_acquisition": fiscal.amortissement_frais_acquisition,
+                "dotation_totale": fiscal.amortissement,
+                "amortissement_utilise": fiscal.amortissement_utilise,
+                "amortissement_reporte": fiscal.amortissement_report_fin,
+                "resultat_imposable": fiscal.resultat_fiscal,
+            }
+        )
 
         projection.append(
             {
@@ -192,6 +270,9 @@ def simuler_bien_sur_horizon(
                 "impot": fiscal.impot,
                 "resultat_fiscal": fiscal.resultat_fiscal,
                 "amortissement": fiscal.amortissement,
+                "amortissement_utilise": fiscal.amortissement_utilise,
+                "amortissement_report_fin": fiscal.amortissement_report_fin,
+                "deficit_report_fin": fiscal.deficit_report_fin,
                 "cashflow_annuel_avant_impot": cashflow_avant_impot,
                 "cashflow_annuel_apres_impot": cashflow_apres_impot,
                 "cashflow_cumule_apres_impot": cashflow_cumule,
@@ -201,9 +282,25 @@ def simuler_bien_sur_horizon(
         )
         flux_tri.append(cashflow_apres_impot)
 
-    projection[-1]["flux_sortie_tri"] = projection[-1]["patrimoine_net_hors_cashflow"]
-    flux_tri[-1] += projection[-1]["patrimoine_net_hors_cashflow"]
+    plus_value = calcul_plus_value(
+        bien=bien,
+        fiscalite=fiscalite,
+        regime=fiscalite.regime,
+        valeur_bien=float(projection[-1]["valeur_bien"]),
+        duree_detention_annees=scenario.horizon_annees,
+        frais_revente_pct=scenario.frais_revente_pct,
+        amortissements_lmnp_deduits_plus_value=amortissements_lmnp_deduits_plus_value,
+    )
+    flux_sortie_net = round(plus_value.prix_cession_net - projection[-1]["capital_restant_du"] - plus_value.impot_total, 2)
+    patrimoine_net_sortie = round(flux_sortie_net + cashflow_cumule, 2)
+    projection[-1]["valeur_nette_revente"] = plus_value.prix_cession_net
+    projection[-1]["impot_plus_value"] = plus_value.impot_total
+    projection[-1]["flux_sortie_tri"] = flux_sortie_net
+    projection[-1]["patrimoine_net_hors_cashflow"] = flux_sortie_net
+    projection[-1]["patrimoine_net"] = patrimoine_net_sortie
+    flux_tri[-1] += flux_sortie_net
     tri = _tri_annuel_approx(flux_tri)
+    van = _van(flux_tri, scenario.taux_actualisation_pct)
 
     premiere_annee = projection[1]
     rb = rendement_brut(bien, location_scenario)
@@ -216,6 +313,11 @@ def simuler_bien_sur_horizon(
     )
     cashflow_mensuel_avant = round(premiere_annee["cashflow_annuel_avant_impot"] / 12, 2)
     cashflow_mensuel_apres = round(premiere_annee["cashflow_annuel_apres_impot"] / 12, 2)
+    cash_on_cash_return_pct = (
+        round(premiere_annee["cashflow_annuel_apres_impot"] / financement.apport * 100, 2)
+        if financement.apport > 0
+        else None
+    )
     rendement_net_net = round(
         (
             premiere_annee["revenus_hc"]
@@ -244,4 +346,20 @@ def simuler_bien_sur_horizon(
         tri_annuel_approx_pct=round(tri * 100, 2) if tri is not None else None,
         patrimoine_net_horizon=projection[-1]["patrimoine_net"],
         projection_annuelle=projection,
+        mode_location=location_scenario.mode_location,
+        regime_fiscal=fiscalite.regime,
+        tri_annuel_pct=round(tri * 100, 2) if tri is not None else None,
+        van=van,
+        cash_on_cash_return_pct=cash_on_cash_return_pct,
+        cashflow_cumule_horizon=cashflow_cumule,
+        patrimoine_net_sortie=patrimoine_net_sortie,
+        flux_sortie_net=flux_sortie_net,
+        impot_plus_value=plus_value.impot_total,
+        impots_total_horizon=round(impots_total_horizon + plus_value.impot_total, 2),
+        break_even_year=break_even_year,
+        nb_annees_cashflow_negatif=nb_annees_cashflow_negatif,
+        fiscalite_annuelle=fiscalite_annuelle,
+        amortissements_fiscaux=amortissements_fiscaux,
+        credit_annuel=credit_annuel,
+        plus_value=plus_value.to_dict(),
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import os
 from pathlib import Path
 import sys
@@ -19,6 +19,7 @@ if str(SRC_PATH) not in sys.path:
 
 from achat_immo.auth import verify_password
 from achat_immo.grids import (
+    GrilleResultat,
     GrilleParametres,
     compter_scenarios_grille,
     generer_plage_float,
@@ -26,6 +27,7 @@ from achat_immo.grids import (
     grille_to_dataframe,
     simuler_grille_annonce,
 )
+from achat_immo.loan import tableau_amortissement
 from achat_immo.comparison import SeuilsDecision
 from achat_immo.city_profiles import (
     SECTEUR_A_VERIFIER,
@@ -45,9 +47,12 @@ from achat_immo.hypothesis_inference import (
 from achat_immo.models import (
     BienImmobilier,
     EpoqueConstruction,
+    Fiscalite,
     HypothesesLocation,
     ModeLocation,
     RegimeFiscal,
+    ResultatSimulation,
+    Scenario,
     TypeBien,
 )
 from achat_immo.robustness import RobustesseGrille, analyser_grille
@@ -78,6 +83,9 @@ STATUTS = [
     "archive",
 ]
 
+SIMULATION_SECTION_LABELS = ("Exploitation", "Strategies testees", "Analyse")
+PORTFOLIO_DECISION_LABEL = "Decision portefeuille"
+
 
 HYPOTHESES_HELP = {
     "frais_notaire_estimes": (
@@ -93,8 +101,8 @@ HYPOTHESES_HELP = {
         "Inclure travaux immediats, energetiques, remise en location et marge d'imprevu."
     ),
     "meubles_estimes": (
-        "Budget mobilier pour une location meublee. Impact sur le financement et sur l'amortissement LMNP reel. "
-        "Mettre 0 en location nue."
+        "Budget mobilier du scenario meuble. Il reste saisi meme si le regime de reference est nu : "
+        "le moteur le neutralise automatiquement pour les strategies en location nue."
     ),
     "frais_bancaires": (
         "Frais de dossier, courtage eventuel et petits frais de mise en place du pret. Impact modere mais finance."
@@ -149,8 +157,8 @@ HYPOTHESES_HELP = {
         "Autorise la grille a tester les scenarios avec agence. Si decoche, les scenarios agence sont exclus."
     ),
     "regime_fiscal": (
-        "Choix du regime d'imposition modelise. Meuble : LMNP reel ou micro-BIC. Nue : reel foncier ou "
-        "micro-foncier. Source : https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
+        "Regime fiscal de reference pour l'annonce. La simulation peut ensuite tester automatiquement les "
+        "regimes compatibles. Source : https://www.impots.gouv.fr/particulier/les-regimes-dimposition"
     ),
     "tmi_pct": (
         "Tranche marginale d'imposition du foyer. Le modele applique TMI + prelevements sociaux au resultat "
@@ -184,6 +192,119 @@ HYPOTHESES_HELP = {
         "d'exclusion. Source : https://bofip.impots.gouv.fr/bofip/3973-PGP.html"
     ),
 }
+
+FIELD_HELP = HYPOTHESES_HELP
+
+SIMULATION_HELP = {
+    "prix_decotes": (
+        "Teste le prix affiche et les decotes de negociation. A modifier si la marge de negociation est "
+        "manifestement plus faible ou plus forte."
+    ),
+    "loyer_variations": (
+        "Teste un loyer prudent, central et optimiste autour du loyer de reference. Le plafond local reste applique."
+    ),
+    "taux_credit": "Taux annuels a comparer. Garde une fourchette courte pour lire rapidement l'effet bancaire.",
+    "durees": "Durees de credit proposees. Elles pilotent fortement le cash-flow et le patrimoine net.",
+    "apports": "Fonds propres investis au depart. Sert au TRI fonds propres et au cash-on-cash.",
+    "assurance_emprunteur": "Taux annuel d'assurance emprunteur applique au capital initial.",
+    "vacances": "Vacance locative annuelle testee. Un mois par an correspond a environ 8,33 % de vacance.",
+    "modes_gestion": "Compare gestion directe et agence si l'annonce peut rester viable avec delegation.",
+    "frais_gestion": "Honoraires annuels d'agence en pourcentage des loyers encaisses.",
+    "comparer_regimes": "Teste automatiquement les regimes fiscaux compatibles avec le mode de location retenu.",
+    "comparer_modes": "Ajoute la comparaison meublee / nue. Utile si la strategie n'est pas encore tranchee.",
+    "regimes_fiscaux": "Permet d'exclure un regime que tu ne souhaites pas utiliser malgre sa compatibilite.",
+    "horizon": "Duree de detention analysee. Elle change le TRI, la plus-value et le capital restant du.",
+    "taux_actualisation": "Cout du capital utilise pour la VAN. 4 % est une valeur prudente par defaut.",
+    "commentaire": "Libelle du snapshot sauvegarde pour retrouver l'hypothese de travail.",
+    "grille_avancee": "Active les min/max/pas historiques si tu veux une grille plus large que le mode compact.",
+}
+
+FIELD_ORIGIN = {
+    "frais_notaire_estimes": "Saisi",
+    "frais_agence_achat": "Saisi",
+    "travaux_estimes": "Saisi",
+    "meubles_estimes": "Saisi",
+    "frais_bancaires": "Saisi",
+    "garantie": "Saisi",
+    "mode_location": "Saisi",
+    "loyer_hc_mensuel": "Saisi",
+    "taxe_fonciere": "Saisi",
+    "charges_copro_annuelles": "Saisi",
+    "charges_recuperables_annuelles": "Saisi",
+    "assurance_pno": "Saisi",
+    "assurance_gli": "Saisi",
+    "cfe_annuelle": "Saisi",
+    "comptable_lmnp": "Saisi",
+    "entretien_annuel": "Saisi",
+    "gestion_agence_possible": "Saisi",
+    "regime_fiscal": "Saisi",
+    "tmi_pct": "Saisi",
+    "prelevements_sociaux_pct": "Deduit",
+    "abattement_micro_bic_pct": "Deduit",
+    "abattement_micro_foncier_pct": "Deduit",
+    "seuil_micro_bic": "Deduit",
+    "seuil_micro_foncier": "Deduit",
+    "taux_impot_plus_value_pct": "Deduit",
+    "taux_prelevements_sociaux_plus_value_pct": "Deduit",
+    "reintegrer_amortissements_lmnp_plus_value": "Deduit",
+    "cfe_neutralisee": "Deduit",
+    "comptable_lmnp_neutralise": "Deduit",
+    "part_terrain_pct": "Avance",
+    "duree_amortissement_bien_annees": "Avance",
+    "duree_amortissement_travaux_annees": "Avance",
+    "duree_amortissement_meubles_annees": "Avance",
+}
+
+
+def field_origin(field_name: str) -> str:
+    return FIELD_ORIGIN.get(field_name, "Saisi")
+
+
+def is_deduced_field(field_name: str) -> bool:
+    return field_origin(field_name) == "Deduit"
+
+
+def is_advanced_field(field_name: str) -> bool:
+    return field_origin(field_name) == "Avance"
+
+
+def is_cfe_applicable(mode_location: ModeLocation) -> bool:
+    return mode_location == ModeLocation.MEUBLEE
+
+
+def is_comptable_lmnp_applicable(regime_fiscal: RegimeFiscal) -> bool:
+    return regime_fiscal == RegimeFiscal.LMNP_REEL
+
+
+def effective_cfe_value(mode_location: ModeLocation, value: float) -> float:
+    return float(value) if is_cfe_applicable(mode_location) else 0.0
+
+
+def effective_comptable_lmnp_value(regime_fiscal: RegimeFiscal, value: float) -> float:
+    return float(value) if is_comptable_lmnp_applicable(regime_fiscal) else 0.0
+
+
+def derived_fiscalite_values(regime_fiscal: RegimeFiscal) -> dict[str, float | bool]:
+    defaults = Fiscalite()
+    return {
+        "prelevements_sociaux_pct": prelevements_sociaux_par_regime(regime_fiscal),
+        "abattement_micro_bic_pct": defaults.abattement_micro_bic_pct,
+        "abattement_micro_foncier_pct": defaults.abattement_micro_foncier_pct,
+        "taux_impot_plus_value_pct": defaults.taux_impot_plus_value_pct,
+        "taux_prelevements_sociaux_plus_value_pct": defaults.taux_prelevements_sociaux_plus_value_pct,
+        "reintegrer_amortissements_lmnp_plus_value": defaults.reintegrer_amortissements_lmnp_plus_value,
+    }
+
+
+def _badge_caption(field_name: str) -> None:
+    st.caption(f"Champ {field_origin(field_name)}")
+
+
+def _readonly_field(label: str, value: str, field_name: str, help_text: str) -> None:
+    with st.container(border=True):
+        st.markdown(f"**{label}**")
+        st.write(value)
+        st.caption(f"Champ {field_origin(field_name)} - {help_text}")
 
 
 @st.cache_resource
@@ -547,52 +668,58 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         st.info("Cree ou selectionne une annonce dans la barre laterale.")
         return
 
-    st.subheader("Hypotheses du modele")
-    st.caption("Ces valeurs ne viennent pas toutes de l'annonce. Elles cadrent le cout total et l'exploitation.")
+    st.subheader("Hypotheses d'investissement")
+    st.caption(
+        "Parcours guide : les champs Saisi sont tes donnees d'entree, les champs Deduit sont calcules "
+        "depuis le regime, et les champs Avance restent replis."
+    )
     _hypotheses_inference_panel(conn, annonce, hypotheses)
 
     with st.form("hypotheses_form"):
         achat, exploitation, frais, fiscalite_col = st.columns(4)
         with exploitation:
             st.markdown("**Exploitation**")
+            st.caption("Donnees brutes du bien et du bail vise.")
             mode_location = st.selectbox(
                 "Mode location",
                 options=list(ModeLocation),
                 index=list(ModeLocation).index(hypotheses.mode_location),
                 format_func=_enum_label,
-                help=HYPOTHESES_HELP["mode_location"],
+                help=FIELD_HELP["mode_location"],
             )
+            _badge_caption("mode_location")
             loyer_reference = st.number_input(
                 "Loyer HC de reference",
                 min_value=1.0,
                 value=float(hypotheses.loyer_hc_mensuel),
                 step=10.0,
-                help=HYPOTHESES_HELP["loyer_hc_mensuel"],
+                help=FIELD_HELP["loyer_hc_mensuel"],
             )
             taxe_fonciere = st.number_input(
                 "Taxe fonciere",
                 min_value=0.0,
                 value=float(hypotheses.taxe_fonciere),
                 step=50.0,
-                help=HYPOTHESES_HELP["taxe_fonciere"],
+                help=FIELD_HELP["taxe_fonciere"],
             )
             charges_copro = st.number_input(
                 "Charges copro annuelles",
                 min_value=0.0,
                 value=float(hypotheses.charges_copro_annuelles),
                 step=50.0,
-                help=HYPOTHESES_HELP["charges_copro_annuelles"],
+                help=FIELD_HELP["charges_copro_annuelles"],
             )
             charges_recup = st.number_input(
                 "Charges recuperables annuelles",
                 min_value=0.0,
                 value=float(hypotheses.charges_recuperables_annuelles),
                 step=50.0,
-                help=HYPOTHESES_HELP["charges_recuperables_annuelles"],
+                help=FIELD_HELP["charges_recuperables_annuelles"],
             )
 
         with fiscalite_col:
             st.markdown("**Fiscalite**")
+            st.caption("Choix de reference et constantes fiscales deduites.")
             regime_options = regimes_compatibles(mode_location)
             current_regime = (
                 hypotheses.regime_fiscal
@@ -600,12 +727,13 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                 else regime_fiscal_recommande(mode_location, float(loyer_reference) * 12)
             )
             regime_fiscal = st.selectbox(
-                "Regime",
+                "Regime de reference",
                 options=list(regime_options),
                 index=list(regime_options).index(current_regime),
                 format_func=_enum_label,
-                help=HYPOTHESES_HELP["regime_fiscal"],
+                help=FIELD_HELP["regime_fiscal"],
             )
+            _badge_caption("regime_fiscal")
             tmi_pct = st.number_input(
                 "TMI %",
                 min_value=0.0,
@@ -613,30 +741,48 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                 value=float(hypotheses.tmi_pct),
                 step=1.0,
                 format="%.1f",
-                help=HYPOTHESES_HELP["tmi_pct"],
+                help=FIELD_HELP["tmi_pct"],
             )
-            expected_prelevements = prelevements_sociaux_par_regime(regime_fiscal)
-            prelevements_sociaux_pct = st.number_input(
-                "Prelevements sociaux %",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(hypotheses.prelevements_sociaux_pct),
-                step=0.1,
-                format="%.1f",
-                help=HYPOTHESES_HELP["prelevements_sociaux_pct"],
+            derived_values = derived_fiscalite_values(regime_fiscal)
+            prelevements_sociaux_pct = float(derived_values["prelevements_sociaux_pct"])
+            abattement_micro_bic = float(derived_values["abattement_micro_bic_pct"])
+            abattement_micro_foncier = float(derived_values["abattement_micro_foncier_pct"])
+            _readonly_field(
+                "Prelevements sociaux",
+                f"{prelevements_sociaux_pct:.1f} %",
+                "prelevements_sociaux_pct",
+                FIELD_HELP["prelevements_sociaux_pct"],
             )
-            if abs(float(prelevements_sociaux_pct) - expected_prelevements) > 0.05:
-                st.warning(
-                    f"Taux officiel attendu pour ce regime : {expected_prelevements:.1f} %. "
-                    "Utilise les suggestions automatiques ou corrige le champ si ce n'est pas volontaire."
+            if regime_fiscal == RegimeFiscal.MICRO_BIC:
+                _readonly_field(
+                    "Abattement micro-BIC",
+                    f"{abattement_micro_bic:.1f} %",
+                    "abattement_micro_bic_pct",
+                    FIELD_HELP["abattement_micro_bic_pct"],
                 )
-            part_terrain_pct = hypotheses.part_terrain_pct
-            duree_amortissement_bien = hypotheses.duree_amortissement_bien_annees
-            duree_amortissement_travaux = hypotheses.duree_amortissement_travaux_annees
-            duree_amortissement_meubles = hypotheses.duree_amortissement_meubles_annees
-            abattement_micro_bic = hypotheses.abattement_micro_bic_pct
-            abattement_micro_foncier = hypotheses.abattement_micro_foncier_pct
-            if regime_fiscal == RegimeFiscal.LMNP_REEL:
+            elif regime_fiscal == RegimeFiscal.MICRO_FONCIER:
+                _readonly_field(
+                    "Abattement micro-foncier",
+                    f"{abattement_micro_foncier:.1f} %",
+                    "abattement_micro_foncier_pct",
+                    FIELD_HELP["abattement_micro_foncier_pct"],
+                )
+            _readonly_field(
+                "Plus-value immobiliere",
+                (
+                    f"IR {derived_values['taux_impot_plus_value_pct']:.1f} %, "
+                    f"PS {derived_values['taux_prelevements_sociaux_plus_value_pct']:.1f} %"
+                ),
+                "taux_impot_plus_value_pct",
+                "Taux et abattements de duree appliques par le moteur selon le regime de sortie.",
+            )
+
+            part_terrain_pct = float(hypotheses.part_terrain_pct)
+            duree_amortissement_bien = int(hypotheses.duree_amortissement_bien_annees)
+            duree_amortissement_travaux = int(hypotheses.duree_amortissement_travaux_annees)
+            duree_amortissement_meubles = int(hypotheses.duree_amortissement_meubles_annees)
+            with st.expander("Fiscalite avancee", expanded=False):
+                st.caption("A modifier seulement si ton comptable retient un plan different.")
                 part_terrain_pct = st.number_input(
                     "Part terrain non amortissable %",
                     min_value=0.0,
@@ -644,7 +790,7 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     value=float(hypotheses.part_terrain_pct),
                     step=1.0,
                     format="%.1f",
-                    help=HYPOTHESES_HELP["part_terrain_pct"],
+                    help=FIELD_HELP["part_terrain_pct"],
                 )
                 duree_amortissement_bien = st.number_input(
                     "Amortissement bien annees",
@@ -652,7 +798,7 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     max_value=80,
                     value=int(hypotheses.duree_amortissement_bien_annees),
                     step=1,
-                    help=HYPOTHESES_HELP["duree_amortissement_bien_annees"],
+                    help=FIELD_HELP["duree_amortissement_bien_annees"],
                 )
                 duree_amortissement_travaux = st.number_input(
                     "Amortissement travaux annees",
@@ -660,7 +806,7 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     max_value=50,
                     value=int(hypotheses.duree_amortissement_travaux_annees),
                     step=1,
-                    help=HYPOTHESES_HELP["duree_amortissement_travaux_annees"],
+                    help=FIELD_HELP["duree_amortissement_travaux_annees"],
                 )
                 duree_amortissement_meubles = st.number_input(
                     "Amortissement meubles annees",
@@ -668,118 +814,121 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     max_value=20,
                     value=int(hypotheses.duree_amortissement_meubles_annees),
                     step=1,
-                    help=HYPOTHESES_HELP["duree_amortissement_meubles_annees"],
+                    help=FIELD_HELP["duree_amortissement_meubles_annees"],
                 )
-            elif regime_fiscal == RegimeFiscal.MICRO_BIC:
-                abattement_micro_bic = st.number_input(
-                    "Abattement micro-BIC %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(hypotheses.abattement_micro_bic_pct),
-                    step=1.0,
-                    format="%.1f",
-                    help=HYPOTHESES_HELP["abattement_micro_bic_pct"],
-                )
-            elif regime_fiscal == RegimeFiscal.MICRO_FONCIER:
-                abattement_micro_foncier = st.number_input(
-                    "Abattement micro-foncier %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(hypotheses.abattement_micro_foncier_pct),
-                    step=1.0,
-                    format="%.1f",
-                    help=HYPOTHESES_HELP["abattement_micro_foncier_pct"],
+                _readonly_field(
+                    "Options frais",
+                    "Acquisition amortie sur 5 ans, frais d'emprunt deduits annee 1",
+                    "reintegrer_amortissements_lmnp_plus_value",
+                    "Options par defaut du moteur fiscal v1.",
                 )
 
         with achat:
             st.markdown("**Acquisition**")
+            st.caption("Couts bruts du projet, avant strategie fiscale.")
             frais_notaire = st.number_input(
                 "Frais notaire estimes",
                 min_value=0.0,
                 value=float(hypotheses.frais_notaire_estimes),
                 step=500.0,
-                help=HYPOTHESES_HELP["frais_notaire_estimes"],
+                help=FIELD_HELP["frais_notaire_estimes"],
             )
             frais_agence_achat = st.number_input(
                 "Frais agence achat",
                 min_value=0.0,
                 value=float(hypotheses.frais_agence_achat),
                 step=500.0,
-                help=HYPOTHESES_HELP["frais_agence_achat"],
+                help=FIELD_HELP["frais_agence_achat"],
             )
             travaux = st.number_input(
                 "Travaux",
                 min_value=0.0,
                 value=float(hypotheses.travaux_estimes),
                 step=500.0,
-                help=HYPOTHESES_HELP["travaux_estimes"],
+                help=FIELD_HELP["travaux_estimes"],
             )
             meubles = st.number_input(
-                "Meubles",
+                "Meubles (budget si meuble)",
                 min_value=0.0,
                 value=float(hypotheses.meubles_estimes),
                 step=500.0,
-                help=HYPOTHESES_HELP["meubles_estimes"],
-                disabled=mode_location == ModeLocation.NUE,
+                help=FIELD_HELP["meubles_estimes"],
             )
             frais_bancaires = st.number_input(
                 "Frais bancaires",
                 min_value=0.0,
                 value=float(hypotheses.frais_bancaires),
                 step=100.0,
-                help=HYPOTHESES_HELP["frais_bancaires"],
+                help=FIELD_HELP["frais_bancaires"],
             )
             garantie = st.number_input(
                 "Garantie",
                 min_value=0.0,
                 value=float(hypotheses.garantie),
                 step=100.0,
-                help=HYPOTHESES_HELP["garantie"],
+                help=FIELD_HELP["garantie"],
             )
 
         with frais:
             st.markdown("**Frais recurrents**")
+            st.caption("Charges d'exploitation payees par le proprietaire.")
             assurance_pno = st.number_input(
                 "Assurance PNO",
                 min_value=0.0,
                 value=float(hypotheses.assurance_pno),
                 step=20.0,
-                help=HYPOTHESES_HELP["assurance_pno"],
+                help=FIELD_HELP["assurance_pno"],
             )
             assurance_gli = st.number_input(
                 "Assurance GLI",
                 min_value=0.0,
                 value=float(hypotheses.assurance_gli),
                 step=20.0,
-                help=HYPOTHESES_HELP["assurance_gli"],
+                help=FIELD_HELP["assurance_gli"],
             )
-            cfe_annuelle = st.number_input(
-                "CFE annuelle",
-                min_value=0.0,
-                value=float(hypotheses.cfe_annuelle if mode_location == ModeLocation.MEUBLEE else 0.0),
-                step=50.0,
-                help=HYPOTHESES_HELP["cfe_annuelle"],
-                disabled=mode_location == ModeLocation.NUE,
-            )
-            comptable_lmnp = st.number_input(
-                "Comptable LMNP",
-                min_value=0.0,
-                value=float(hypotheses.comptable_lmnp if regime_fiscal == RegimeFiscal.LMNP_REEL else 0.0),
-                step=50.0,
-                help=HYPOTHESES_HELP["comptable_lmnp"],
-                disabled=regime_fiscal != RegimeFiscal.LMNP_REEL,
-            )
+            if is_cfe_applicable(mode_location):
+                cfe_annuelle = st.number_input(
+                    "CFE annuelle",
+                    min_value=0.0,
+                    value=float(hypotheses.cfe_annuelle),
+                    step=50.0,
+                    help=FIELD_HELP["cfe_annuelle"],
+                )
+            else:
+                cfe_annuelle = 0.0
+                _readonly_field(
+                    "CFE annuelle",
+                    "0 EUR",
+                    "cfe_neutralisee",
+                    "Non applicable en location nue dans le parcours standard.",
+                )
+            if is_comptable_lmnp_applicable(regime_fiscal):
+                comptable_lmnp = st.number_input(
+                    "Comptable LMNP",
+                    min_value=0.0,
+                    value=float(hypotheses.comptable_lmnp),
+                    step=50.0,
+                    help=FIELD_HELP["comptable_lmnp"],
+                )
+            else:
+                comptable_lmnp = 0.0
+                _readonly_field(
+                    "Comptable LMNP",
+                    "0 EUR",
+                    "comptable_lmnp_neutralise",
+                    "Neutralise hors LMNP reel.",
+                )
             entretien_annuel = st.number_input(
                 "Entretien annuel",
                 min_value=0.0,
                 value=float(hypotheses.entretien_annuel),
                 step=50.0,
-                help=HYPOTHESES_HELP["entretien_annuel"],
+                help=FIELD_HELP["entretien_annuel"],
             )
             gestion_agence_possible = st.checkbox(
                 "Gestion agence possible",
                 value=bool(hypotheses.gestion_agence_possible),
-                help=HYPOTHESES_HELP["gestion_agence_possible"],
+                help=FIELD_HELP["gestion_agence_possible"],
             )
 
         if st.form_submit_button("Sauvegarder les hypotheses"):
@@ -789,7 +938,10 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
             regime_sauvegarde = regime_fiscal
             if regime_sauvegarde not in regimes_compatibles(mode_location):
                 regime_sauvegarde = regime_fiscal_recommande(mode_location, float(loyer_reference) * 12)
-                prelevements_sociaux_pct = prelevements_sociaux_par_regime(regime_sauvegarde)
+            derived_values = derived_fiscalite_values(regime_sauvegarde)
+            prelevements_sociaux_pct = float(derived_values["prelevements_sociaux_pct"])
+            abattement_micro_bic = float(derived_values["abattement_micro_bic_pct"])
+            abattement_micro_foncier = float(derived_values["abattement_micro_foncier_pct"])
             save_annonce(
                 conn,
                 annonce,
@@ -798,7 +950,7 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     frais_agence_achat=frais_agence_achat,
                     frais_notaire_estimes=frais_notaire,
                     travaux_estimes=travaux,
-                    meubles_estimes=0.0 if mode_location == ModeLocation.NUE else meubles,
+                    meubles_estimes=meubles,
                     frais_bancaires=frais_bancaires,
                     garantie=garantie,
                     loyer_hc_mensuel=loyer_reference,
@@ -808,8 +960,8 @@ def _hypotheses_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
                     charges_recuperables_annuelles=charges_recup,
                     assurance_pno=assurance_pno,
                     assurance_gli=assurance_gli,
-                    cfe_annuelle=0.0 if mode_location == ModeLocation.NUE else cfe_annuelle,
-                    comptable_lmnp=0.0 if regime_sauvegarde != RegimeFiscal.LMNP_REEL else comptable_lmnp,
+                    cfe_annuelle=effective_cfe_value(mode_location, cfe_annuelle),
+                    comptable_lmnp=effective_comptable_lmnp_value(regime_sauvegarde, comptable_lmnp),
                     entretien_annuel=entretien_annuel,
                     regime_fiscal=regime_sauvegarde,
                     tmi_pct=tmi_pct,
@@ -831,33 +983,101 @@ def _simulation_inputs(
     bien: BienImmobilier,
     location: HypothesesLocation,
     hypotheses: HypothesesAchatRecord,
-) -> tuple[BienImmobilier, HypothesesLocation, GrilleParametres, str, int, str]:
+    fiscalite: Any,
+) -> tuple[BienImmobilier, HypothesesLocation, GrilleParametres, Scenario, str, int, str]:
     st.subheader("Parametres de simulation")
-    revenus, credit, gestion = st.columns(3)
-    with revenus:
-        with st.container(border=True):
-            st.markdown("**Revenus locatifs**")
-            plafond_loyer = loyer_max_hc_mensuel(bien, location)
-            loyer_reference = float(hypotheses.loyer_hc_mensuel)
-            if plafond_loyer is not None:
-                loyer_reference = min(loyer_reference, plafond_loyer)
-                st.caption(f"Plafond local calcule : {plafond_loyer:,.0f} EUR HC/mois.")
-            elif (profile := profile_for_city(bien.ville)) and profile.requires_rent_sector:
-                st.caption("Plafond local non calcule : complete le secteur et l'epoque de construction.")
-            loyer_min_default = max(1.0, loyer_reference - 50.0)
-            loyer_max_default = loyer_reference + 50.0
-            input_bounds: dict[str, float] = {}
-            if plafond_loyer is not None:
-                loyer_min_default = min(loyer_min_default, plafond_loyer)
-                loyer_max_default = min(loyer_max_default, plafond_loyer)
-                input_bounds["max_value"] = float(plafond_loyer)
-            loyer_min = st.number_input(
-                "Loyer HC min",
-                min_value=1.0,
-                value=float(loyer_min_default),
-                step=10.0,
-                **input_bounds,
+    st.caption(
+        "La grille compacte teste les leviers qui changent vraiment la decision. Les min/max/pas restent "
+        "disponibles dans Grille avancee."
+    )
+
+    plafond_loyer = loyer_max_hc_mensuel(bien, location)
+    loyer_reference = float(hypotheses.loyer_hc_mensuel)
+    if plafond_loyer is not None:
+        loyer_reference = min(loyer_reference, plafond_loyer)
+        st.caption(f"Plafond local calcule : {plafond_loyer:,.0f} EUR HC/mois.")
+    elif (profile := profile_for_city(bien.ville)) and profile.requires_rent_sector:
+        st.caption("Plafond local non calcule : complete le secteur et l'epoque de construction.")
+
+    with st.container(border=True):
+        st.markdown("**Grille compacte**")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        prix_reference = float(bien.prix_achat)
+        with c1:
+            prix_decotes = st.multiselect(
+                "Decotes prix",
+                [0.0, 5_000.0, 10_000.0, 15_000.0, 20_000.0],
+                default=[0.0, 5_000.0, 10_000.0],
+                format_func=lambda value: f"-{value:,.0f} EUR" if value else "prix affiche",
+                help=SIMULATION_HELP["prix_decotes"],
             )
+        with c2:
+            loyer_variations = st.multiselect(
+                "Variations loyer",
+                [-50.0, -25.0, 0.0, 25.0, 50.0],
+                default=[-50.0, 0.0, 50.0],
+                format_func=lambda value: f"{value:+,.0f} EUR",
+                help=SIMULATION_HELP["loyer_variations"],
+            )
+        with c3:
+            taux_proposes = st.multiselect(
+                "Taux credit testes",
+                [3.3, 3.6, 4.0],
+                default=[3.3, 3.6, 4.0],
+                format_func=lambda value: f"{value:.2f} %",
+                help=SIMULATION_HELP["taux_credit"],
+            )
+        with c4:
+            durees_proposees = st.multiselect(
+                "Durees credit",
+                [15, 20, 25],
+                default=[20, 25],
+                format_func=lambda value: f"{value} ans",
+                help=SIMULATION_HELP["durees"],
+            )
+        with c5:
+            apports = st.multiselect(
+                "Apports",
+                [10_000.0, 15_000.0, 20_000.0, 25_000.0],
+                default=[10_000.0, 15_000.0, 20_000.0],
+                format_func=lambda value: f"{value:,.0f} EUR",
+                help=SIMULATION_HELP["apports"],
+            )
+        assurance_emprunteur = st.number_input(
+            "Assurance emprunteur %/an",
+            min_value=0.0,
+            value=float(hypotheses.assurance_emprunteur_pct),
+            step=0.05,
+            format="%.2f",
+            help=SIMULATION_HELP["assurance_emprunteur"],
+        )
+
+    loyer_min_default = max(1.0, loyer_reference - 50.0)
+    loyer_max_default = loyer_reference + 50.0
+    input_bounds: dict[str, float] = {}
+    if plafond_loyer is not None:
+        loyer_min_default = min(loyer_min_default, plafond_loyer)
+        loyer_max_default = min(loyer_max_default, plafond_loyer)
+        input_bounds["max_value"] = float(plafond_loyer)
+
+    with st.expander("Grille avancee", expanded=False):
+        use_advanced_grid = st.checkbox(
+            "Utiliser les min/max/pas ci-dessous",
+            value=False,
+            help=SIMULATION_HELP["grille_avancee"],
+        )
+        g1, g2, g3, g4 = st.columns(4)
+        with g1:
+            prix_min = st.number_input(
+                "Prix achat min",
+                min_value=1_000.0,
+                value=max(1_000.0, prix_reference - 10_000.0),
+                step=1_000.0,
+            )
+            prix_max = st.number_input("Prix achat max", min_value=1_000.0, value=prix_reference, step=1_000.0)
+            prix_pas = st.number_input("Pas prix", min_value=1_000.0, value=5_000.0, step=1_000.0)
+        with g2:
+            loyer_min = st.number_input("Loyer HC min", min_value=1.0, value=float(loyer_min_default), step=10.0, **input_bounds)
             loyer_max = st.number_input(
                 "Loyer HC max",
                 min_value=1.0,
@@ -866,62 +1086,108 @@ def _simulation_inputs(
                 **input_bounds,
             )
             loyer_pas = st.number_input("Pas loyer", min_value=1.0, value=25.0, step=5.0)
+        with g3:
+            taux_min = st.number_input("Taux credit min %", min_value=0.0, value=3.30, step=0.10, format="%.2f")
+            taux_max = st.number_input("Taux credit max %", min_value=0.0, value=4.00, step=0.10, format="%.2f")
+            taux_pas = st.number_input("Pas taux %", min_value=0.01, value=0.10, step=0.01, format="%.2f")
+        with g4:
+            duree_min = st.number_input("Duree credit min annees", min_value=1, max_value=30, value=15, step=1)
+            duree_max = st.number_input("Duree credit max annees", min_value=1, max_value=30, value=25, step=1)
+            duree_pas = st.number_input("Pas duree annees", min_value=1, max_value=10, value=1, step=1)
+
+    exploitation, strategies, analyse = st.columns(3)
+    with exploitation:
+        with st.container(border=True):
+            st.markdown(f"**{SIMULATION_SECTION_LABELS[0]}**")
             vacances = st.multiselect(
                 "Vacance mois/an",
                 [0.0, 1.0, 2.0, 3.0],
                 default=[0.0, 1.0, 2.0],
-                help="0 mois represente le cas optimiste. Les scenarios prudents restent au moins a 1 mois/an.",
+                help=SIMULATION_HELP["vacances"],
+            )
+            default_modes = ["directe", "agence"] if hypotheses.gestion_agence_possible else ["directe"]
+            modes_gestion = st.multiselect(
+                "Mode de gestion",
+                ["directe", "agence"],
+                default=default_modes,
+                help=SIMULATION_HELP["modes_gestion"],
+            )
+            frais_gestion = st.multiselect(
+                "Frais gestion agence %",
+                [5.0, 7.0, 8.0],
+                default=[7.0],
+                help=SIMULATION_HELP["frais_gestion"],
             )
 
-    with credit:
+    with strategies:
         with st.container(border=True):
-            st.markdown("**Credit**")
-            prix_reference = float(bien.prix_achat)
-            prix_min = st.number_input(
-                "Prix achat min",
-                min_value=1_000.0,
-                value=max(1_000.0, prix_reference - 10_000.0),
-                step=1_000.0,
+            st.markdown(f"**{SIMULATION_SECTION_LABELS[1]}**")
+            comparer_regimes = st.checkbox(
+                "Comparer regimes fiscaux compatibles",
+                value=True,
+                help=SIMULATION_HELP["comparer_regimes"],
             )
-            prix_max = st.number_input(
-                "Prix achat max",
-                min_value=1_000.0,
-                value=prix_reference,
-                step=1_000.0,
+            comparer_modes = st.checkbox(
+                "Comparer meuble et nue",
+                value=False,
+                help=SIMULATION_HELP["comparer_modes"],
             )
-            prix_pas = st.number_input("Pas prix", min_value=1_000.0, value=5_000.0, step=1_000.0)
-            taux_min = st.number_input("Taux credit min %", min_value=0.0, value=3.30, step=0.10, format="%.2f")
-            taux_max = st.number_input("Taux credit max %", min_value=0.0, value=4.00, step=0.10, format="%.2f")
-            taux_pas = st.number_input("Pas taux %", min_value=0.01, value=0.10, step=0.01, format="%.2f")
-            duree_min = st.number_input("Duree credit min annees", min_value=1, max_value=30, value=15, step=1)
-            duree_max = st.number_input("Duree credit max annees", min_value=1, max_value=30, value=25, step=1)
-            duree_pas = st.number_input("Pas duree annees", min_value=1, max_value=10, value=1, step=1)
-            assurance_emprunteur = st.number_input(
-                "Assurance emprunteur %/an",
+            modes_location = (ModeLocation.MEUBLEE, ModeLocation.NUE) if comparer_modes else (location.mode_location,)
+            default_regimes = tuple(
+                dict.fromkeys(regime for mode in modes_location for regime in regimes_compatibles(mode))
+            )
+            regimes_fiscaux = st.multiselect(
+                "Regimes fiscaux testes",
+                list(RegimeFiscal),
+                default=list(default_regimes),
+                format_func=_enum_label,
+                disabled=not comparer_regimes,
+                help=SIMULATION_HELP["regimes_fiscaux"],
+            )
+
+    with analyse:
+        with st.container(border=True):
+            st.markdown(f"**{SIMULATION_SECTION_LABELS[2]}**")
+            horizon = st.number_input(
+                "Horizon analyse annees",
+                min_value=1,
+                max_value=30,
+                value=10,
+                step=1,
+                help=SIMULATION_HELP["horizon"],
+            )
+            taux_actualisation = st.number_input(
+                "Taux actualisation %",
                 min_value=0.0,
-                value=float(hypotheses.assurance_emprunteur_pct),
-                step=0.05,
+                value=4.0,
+                step=0.25,
                 format="%.2f",
+                help=SIMULATION_HELP["taux_actualisation"],
             )
-            apports = st.multiselect(
-                "Apports",
-                [10_000.0, 15_000.0, 20_000.0, 25_000.0],
-                default=[10_000.0, 15_000.0, 20_000.0],
-                format_func=lambda value: f"{value:,.0f} EUR",
+            commentaire = st.text_input(
+                "Libelle de snapshot",
+                value="simulation de travail",
+                help=SIMULATION_HELP["commentaire"],
             )
-
-    with gestion:
-        with st.container(border=True):
-            st.markdown("**Gestion**")
-            modes_gestion = st.multiselect("Mode de gestion", ["directe", "agence"], default=["directe", "agence"])
-            frais_gestion = st.multiselect("Frais gestion agence %", [5.0, 7.0, 8.0], default=[7.0])
-            commentaire = st.text_input("Libelle de sauvegarde", value="simulation de travail")
 
     try:
-        prix_achats = generer_plage_float(prix_min, prix_max, prix_pas, decimales=0)
-        loyers = generer_plage_float(loyer_min, loyer_max, loyer_pas, decimales=0)
-        taux = generer_plage_float(taux_min, taux_max, taux_pas)
-        durees = generer_plage_int(int(duree_min), int(duree_max), int(duree_pas))
+        if use_advanced_grid:
+            prix_achats = generer_plage_float(prix_min, prix_max, prix_pas, decimales=0)
+            loyers = generer_plage_float(loyer_min, loyer_max, loyer_pas, decimales=0)
+            taux = generer_plage_float(taux_min, taux_max, taux_pas)
+            durees = generer_plage_int(int(duree_min), int(duree_max), int(duree_pas))
+        else:
+            prix_achats = tuple(sorted({round(max(1_000.0, prix_reference - decote), 0) for decote in prix_decotes}))
+            loyers = tuple(
+                sorted(
+                    {
+                        round(min(max(1.0, loyer_reference + variation), plafond_loyer or float("inf")), 0)
+                        for variation in loyer_variations
+                    }
+                )
+            )
+            taux = tuple(float(value) for value in taux_proposes)
+            durees = tuple(int(value) for value in durees_proposees)
     except ValueError as exc:
         st.error(str(exc))
         st.stop()
@@ -941,17 +1207,25 @@ def _simulation_inputs(
         vacances_mois=_as_float_tuple(vacances),
         gestions_agence=tuple(mode == "agence" for mode in modes_gestion),
         frais_gestion_pct=_as_float_tuple(frais_gestion),
-        horizon_annees=10,
+        horizon_annees=int(horizon),
         assurance_emprunteur_annuelle_pct=assurance_emprunteur,
+        modes_location=tuple(modes_location),
+        regimes_fiscaux=tuple(regimes_fiscaux) if comparer_regimes else (),
+        comparer_regimes=bool(comparer_regimes),
+    )
+    scenario_base = Scenario(
+        horizon_annees=int(horizon),
+        taux_actualisation_pct=float(taux_actualisation),
     )
     scenario_count = compter_scenarios_grille(
         bien_simule,
         location_simulee,
         params,
+        fiscalite=fiscalite,
         gestion_agence_possible=bool(hypotheses.gestion_agence_possible),
     )
-    signature = repr((bien_simule, location_simulee, params, bool(hypotheses.gestion_agence_possible)))
-    return bien_simule, location_simulee, params, commentaire, scenario_count, signature
+    signature = repr((bien_simule, location_simulee, params, scenario_base, bool(hypotheses.gestion_agence_possible)))
+    return bien_simule, location_simulee, params, scenario_base, commentaire, scenario_count, signature
 
 
 def _simulation_state_key(annonce_id: int | None, suffix: str) -> str:
@@ -1008,15 +1282,17 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
 
     st.subheader("Simulation")
     st.caption("Les parametres peuvent bouger librement. Le moteur ne calcule qu'au clic.")
-    bien_simule, location_simulee, params, commentaire, scenario_count, signature = _simulation_inputs(
+    bien_simule, location_simulee, params, scenario_base, commentaire, scenario_count, signature = _simulation_inputs(
         bien,
         location,
         hypotheses,
+        fiscalite,
     )
     signature = repr((signature, fiscalite))
     _simulation_summary(bien_simule, params, scenario_count)
 
     df_key = _simulation_state_key(annonce.id, "df")
+    results_key = _simulation_state_key(annonce.id, "objects")
     signature_key = _simulation_state_key(annonce.id, "signature")
     comment_key = _simulation_state_key(annonce.id, "comment")
 
@@ -1027,9 +1303,11 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
             location=location_simulee,
             fiscalite=fiscalite,
             parametres=params,
+            scenario_base=scenario_base,
             gestion_agence_possible=bool(hypotheses.gestion_agence_possible),
         )
         st.session_state[df_key] = grille_to_dataframe(resultats)
+        st.session_state[results_key] = resultats
         st.session_state[signature_key] = signature
         st.session_state[comment_key] = commentaire
 
@@ -1053,15 +1331,30 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
     _robustesse_summary(robustesse)
 
     best = df.iloc[0]
+    tri = best.get("tri_annuel_pct")
+    tri_label = "n/a" if pd.isna(tri) else f"{float(tri):.2f} %"
+    break_even = best.get("break_even_year")
+    break_even_label = "n/a" if pd.isna(break_even) else f"annee {int(break_even)}"
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Meilleur score", int(best["score"]))
-    c2.metric("Cash-flow annee 1", f"{best['cashflow_mensuel_apres_impot']:,.0f} EUR/mois")
-    c3.metric("Pret du meilleur scenario", _format_eur(float(best["montant_emprunte"])))
-    c4.metric("Mensualite credit", f"{best['mensualite_totale']:,.0f} EUR/mois")
-    st.caption(f"{len(df):,} scenarios calcules. Le cash-flow affiche est la moyenne mensuelle de l'annee 1.")
+    c1.metric("TRI fonds propres", tri_label)
+    c2.metric("Patrimoine net sortie", _format_eur(float(best["patrimoine_net_sortie"])))
+    c3.metric("Cash-flow annee 1", f"{best['cashflow_mensuel_apres_impot']:,.0f} EUR/mois")
+    c4.metric("Annees cash-flow negatif", int(best.get("nb_annees_cashflow_negatif", 0)))
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("VAN", _format_eur(float(best.get("van", 0.0))))
+    c6.metric("Cash-flow median grille", _format_eur_optional(robustesse.cashflow_median))
+    c7.metric("Cash-flow P10 grille", _format_eur_optional(robustesse.cashflow_p10))
+    c8.metric("Break-even", break_even_label)
+    st.caption(
+        f"{len(df):,} scenarios calcules. Le cash-flow affiche est la moyenne mensuelle de l'annee 1 ; "
+        "les percentiles sont des percentiles de grille, pas des probabilites."
+    )
+    _strategie_summary(df)
 
     cols = [
         "score",
+        "mode_location",
+        "regime_fiscal",
         "prix_achat",
         "cout_total_projet",
         "loyer_hc_mensuel",
@@ -1077,12 +1370,22 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         "effort_epargne_mensuel",
         "rendement_net_avant_impot_pct",
         "rendement_net_net_pct",
+        "tri_annuel_pct",
+        "van",
+        "cash_on_cash_return_pct",
+        "impot_plus_value",
+        "patrimoine_net_sortie",
+        "break_even_year",
         "alertes",
         "diagnostics",
     ]
-    st.dataframe(df[cols].head(40), width="stretch", hide_index=True)
+    with st.expander("Tableau complet de grille", expanded=False):
+        st.dataframe(df[[col for col in cols if col in df.columns]].head(80), width="stretch", hide_index=True)
     _visualisations(df)
     _decision_map(df, annonce, bien_simule, location_simulee)
+    resultats_objets = st.session_state.get(results_key, [])
+    if resultats_objets:
+        _scenario_details(resultats_objets)
 
     if st.button("Sauvegarder ce snapshot", type="secondary"):
         run_id = save_simulation_run(
@@ -1092,6 +1395,168 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
             commentaire=st.session_state.get(comment_key, commentaire),
         )
         st.success(f"Snapshot #{run_id} sauvegarde.")
+
+
+def _strategie_summary(df: pd.DataFrame) -> None:
+    st.subheader("Meilleures strategies")
+    rows = []
+    if "tri_annuel_pct" in df.columns:
+        tri_df = df.dropna(subset=["tri_annuel_pct"])
+        if not tri_df.empty:
+            row = tri_df.sort_values("tri_annuel_pct", ascending=False).iloc[0]
+            rows.append(("Meilleur TRI", row))
+    if "patrimoine_net_sortie" in df.columns:
+        row = df.sort_values("patrimoine_net_sortie", ascending=False).iloc[0]
+        rows.append(("Meilleur patrimoine net", row))
+    prudent_df = df[df["vacance_mois"] >= 1.0] if "vacance_mois" in df.columns else pd.DataFrame()
+    if not prudent_df.empty:
+        row = prudent_df.sort_values("cashflow_mensuel_apres_impot", ascending=False).iloc[0]
+        rows.append(("Cash-flow prudent", row))
+    rows.append(("Meilleur compromis", df.sort_values("score", ascending=False).iloc[0]))
+
+    synthese = []
+    for objectif, row in rows:
+        synthese.append(
+            {
+                "objectif": objectif,
+                "mode_location": row.get("mode_location", ""),
+                "regime_fiscal": row.get("regime_fiscal", ""),
+                "score": row.get("score"),
+                "tri_annuel_pct": row.get("tri_annuel_pct"),
+                "cashflow_mensuel_apres_impot": row.get("cashflow_mensuel_apres_impot"),
+                "patrimoine_net_sortie": row.get("patrimoine_net_sortie"),
+                "van": row.get("van"),
+                "break_even_year": row.get("break_even_year"),
+                "nb_annees_cashflow_negatif": row.get("nb_annees_cashflow_negatif"),
+                "impot_plus_value": row.get("impot_plus_value"),
+            }
+        )
+    st.dataframe(pd.DataFrame(synthese), hide_index=True, width="stretch")
+
+    group_cols = [col for col in ("mode_location", "regime_fiscal") if col in df.columns]
+    if group_cols and {"tri_annuel_pct", "patrimoine_net_sortie", "cashflow_mensuel_apres_impot"}.issubset(df.columns):
+        strategy_rows = []
+        for key, group in df.groupby(group_cols, dropna=False):
+            if not isinstance(key, tuple):
+                key = (key,)
+            prudent_group = group[group["vacance_mois"] >= 1.0] if "vacance_mois" in group.columns else group
+            cashflow_prudent = (
+                float(prudent_group["cashflow_mensuel_apres_impot"].max())
+                if not prudent_group.empty
+                else float(group["cashflow_mensuel_apres_impot"].max())
+            )
+            strategy_rows.append(
+                {
+                    **dict(zip(group_cols, key, strict=True)),
+                    "tri_annuel_pct": group["tri_annuel_pct"].max(),
+                    "patrimoine_net_sortie": group["patrimoine_net_sortie"].max(),
+                    "cashflow_prudent": cashflow_prudent,
+                    "score": group["score"].max() if "score" in group.columns else None,
+                }
+            )
+        strategy_df = pd.DataFrame(strategy_rows).dropna(subset=["tri_annuel_pct", "patrimoine_net_sortie"])
+        if not strategy_df.empty:
+            strategy_df["strategie"] = strategy_df[group_cols].astype(str).agg(" / ".join, axis=1)
+            fig = px.scatter(
+                strategy_df,
+                x="tri_annuel_pct",
+                y="patrimoine_net_sortie",
+                color="cashflow_prudent",
+                hover_name="strategie",
+                hover_data=["score"],
+                labels={
+                    "tri_annuel_pct": "TRI fonds propres (%)",
+                    "patrimoine_net_sortie": "Patrimoine net sortie",
+                    "cashflow_prudent": "Cash-flow prudent",
+                },
+            )
+            st.plotly_chart(fig, width="stretch")
+
+
+def _scenario_option_label(item: GrilleResultat) -> str:
+    resultat = item.resultat
+    regime = resultat.regime_fiscal.value if resultat.regime_fiscal else item.regime_fiscal.value
+    mode = resultat.mode_location.value if resultat.mode_location else item.mode_location.value
+    tri = "n/a" if resultat.tri_annuel_pct is None else f"{resultat.tri_annuel_pct:.2f} %"
+    return (
+        f"{mode} / {regime} | score {item.score} | "
+        f"CF {resultat.cashflow_mensuel_apres_impot:,.0f} EUR/mois | TRI {tri}"
+    )
+
+
+def _tableau_mensuel_credit(item: GrilleResultat) -> pd.DataFrame:
+    echeances = tableau_amortissement(
+        montant=item.resultat.montant_emprunte,
+        taux_annuel_pct=item.taux_credit,
+        duree_annees=item.duree_annees,
+        assurance_annuelle_pct=item.assurance_emprunteur_annuelle_pct,
+    )
+    return pd.DataFrame([asdict(echeance) for echeance in echeances])
+
+
+def _scenario_details(resultats: list[GrilleResultat]) -> None:
+    with st.expander("Inspection detaillee du scenario selectionne", expanded=False):
+        limit = min(len(resultats), 200)
+        item = st.selectbox(
+            "Scenario inspecte",
+            resultats[:limit],
+            format_func=_scenario_option_label,
+        )
+        resultat: ResultatSimulation = item.resultat
+
+        with st.expander("Amortissement du credit", expanded=True):
+            credit_df = pd.DataFrame(resultat.credit_annuel)
+            if not credit_df.empty:
+                fig = px.bar(
+                    credit_df,
+                    x="annee",
+                    y=["capital", "interets"],
+                    labels={"value": "EUR", "annee": "Annee", "variable": "Flux"},
+                )
+                st.plotly_chart(fig, width="stretch")
+                crd_fig = px.line(credit_df, x="annee", y="crd_fin", markers=True, labels={"crd_fin": "CRD fin"})
+                st.plotly_chart(crd_fig, width="stretch")
+                st.dataframe(credit_df, hide_index=True, width="stretch")
+
+            credit_mensuel_df = _tableau_mensuel_credit(item)
+            st.download_button(
+                "Telecharger le tableau mensuel du credit",
+                credit_mensuel_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"credit_{resultat.scenario.nom}.csv",
+                mime="text/csv",
+            )
+
+        with st.expander("Fiscalite annuelle", expanded=False):
+            fiscal_df = pd.DataFrame(resultat.fiscalite_annuelle)
+            if fiscal_df.empty:
+                st.info("Aucune fiscalite annuelle disponible pour ce scenario.")
+            else:
+                st.dataframe(fiscal_df, hide_index=True, width="stretch")
+
+        with st.expander("Amortissements fiscaux", expanded=False):
+            amort_df = pd.DataFrame(resultat.amortissements_fiscaux)
+            if resultat.regime_fiscal != RegimeFiscal.LMNP_REEL:
+                st.info("Amortissements fiscaux non applicable pour ce regime.")
+            elif amort_df.empty:
+                st.info("Aucun tableau d'amortissement fiscal disponible.")
+            else:
+                fig_amort = px.bar(
+                    amort_df,
+                    x="annee",
+                    y=["bati", "travaux", "meubles", "frais_acquisition"],
+                    labels={"value": "Dotation", "annee": "Annee", "variable": "Composant"},
+                )
+                st.plotly_chart(fig_amort, width="stretch")
+                line_df = amort_df[["annee", "amortissement_reporte", "resultat_imposable"]]
+                line_fig = px.line(
+                    line_df,
+                    x="annee",
+                    y=["amortissement_reporte", "resultat_imposable"],
+                    markers=True,
+                    labels={"value": "EUR", "variable": "Indicateur"},
+                )
+                st.plotly_chart(line_fig, width="stretch")
+                st.dataframe(amort_df, hide_index=True, width="stretch")
 
 
 def _decision_robuste_status(decision: str) -> str:
@@ -1116,7 +1581,7 @@ def _robustesse_summary(robustesse: RobustesseGrille) -> None:
         )
     c2.metric("Scenarios viables", f"{robustesse.nb_viables:,} / {robustesse.nb_scenarios:,}", f"{robustesse.pct_viables:.1f} %")
     c3.metric("Cash-flow median", _format_eur_optional(robustesse.cashflow_median))
-    c4.metric("Cash-flow P10", _format_eur_optional(robustesse.cashflow_p10))
+    c4.metric("Cash-flow P10 grille", _format_eur_optional(robustesse.cashflow_p10))
 
     c5, c6, c7, c8 = st.columns(4)
     c5.metric("Scenarios positifs", f"{robustesse.nb_positifs:,}", f"{robustesse.pct_positifs:.1f} %")
@@ -1137,8 +1602,8 @@ def _robustesse_summary(robustesse: RobustesseGrille) -> None:
 
 
 def _visualisations(df: pd.DataFrame) -> None:
-    st.subheader("Cash-flow mensuel annee 1")
-    f1, f2, f3, f4, f5 = st.columns(5)
+    st.subheader("Sensibilite principale du cash-flow")
+    f1, f2, f3, f4, f5, f6, f7 = st.columns(7)
     with f1:
         prix_achat = st.selectbox("Prix achat", sorted(df["prix_achat"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
     with f2:
@@ -1154,6 +1619,10 @@ def _visualisations(df: pd.DataFrame) -> None:
     with f5:
         frais_gestion_options = sorted(df[df["gestion_agence"] == gestion]["frais_gestion_pct"].unique())
         frais_gestion = st.selectbox("Frais gestion", frais_gestion_options, format_func=lambda v: f"{v:g} %")
+    with f6:
+        mode_location = st.selectbox("Mode", sorted(df["mode_location"].unique()) if "mode_location" in df.columns else [""])
+    with f7:
+        regime_fiscal = st.selectbox("Regime", sorted(df["regime_fiscal"].unique()) if "regime_fiscal" in df.columns else [""])
 
     filtered = df[
         (df["prix_achat"] == prix_achat)
@@ -1162,6 +1631,10 @@ def _visualisations(df: pd.DataFrame) -> None:
         & (df["gestion_agence"] == gestion)
         & (df["frais_gestion_pct"] == frais_gestion)
     ]
+    if "mode_location" in filtered.columns:
+        filtered = filtered[filtered["mode_location"] == mode_location]
+    if "regime_fiscal" in filtered.columns:
+        filtered = filtered[filtered["regime_fiscal"] == regime_fiscal]
     if filtered.empty:
         st.info("Aucune combinaison pour ces filtres.")
         return
@@ -1173,46 +1646,52 @@ def _visualisations(df: pd.DataFrame) -> None:
         with tab:
             _plot_heatmap(vacancy_df, "cashflow_mensuel_apres_impot", "Cash-flow")
 
-    direct_mask = ~df["gestion_agence"].astype(bool)
-    chart_df = df[
-        (df["prix_achat"] == prix_achat)
-        & (df["apport"] == apport)
-        & (direct_mask | (df["frais_gestion_pct"] == frais_gestion))
-    ].copy()
-    chart_df["gestion"] = chart_df["gestion_agence"].map(_gestion_label)
-    chart_df["duree_credit"] = chart_df["duree_annees"].map(lambda duree: f"{int(duree)} ans")
-    chart_df["vacance"] = chart_df["vacance_mois"].map(lambda mois: f"{mois:g} mois")
-    fig = px.line(
-        chart_df.sort_values("taux_credit"),
-        x="taux_credit",
-        y="cashflow_mensuel_apres_impot",
-        color="duree_credit",
-        line_dash="vacance",
-        facet_col="gestion",
-        markers=True,
-        labels={
-            "taux_credit": "Taux",
-            "cashflow_mensuel_apres_impot": "Cash-flow mensuel",
-            "duree_credit": "Duree",
-            "vacance": "Vacance",
-            "gestion": "Gestion",
-        },
-    )
-    st.plotly_chart(fig, width="stretch")
+    with st.expander("Graphes avances", expanded=False):
+        direct_mask = ~df["gestion_agence"].astype(bool)
+        chart_df = df[
+            (df["prix_achat"] == prix_achat)
+            & (df["apport"] == apport)
+            & (direct_mask | (df["frais_gestion_pct"] == frais_gestion))
+        ].copy()
+        if "mode_location" in chart_df.columns:
+            chart_df = chart_df[chart_df["mode_location"] == mode_location]
+        if "regime_fiscal" in chart_df.columns:
+            chart_df = chart_df[chart_df["regime_fiscal"] == regime_fiscal]
+        if not chart_df.empty:
+            chart_df["gestion"] = chart_df["gestion_agence"].map(_gestion_label)
+            chart_df["duree_credit"] = chart_df["duree_annees"].map(lambda duree: f"{int(duree)} ans")
+            chart_df["vacance"] = chart_df["vacance_mois"].map(lambda mois: f"{mois:g} mois")
+            fig = px.line(
+                chart_df.sort_values("taux_credit"),
+                x="taux_credit",
+                y="cashflow_mensuel_apres_impot",
+                color="duree_credit",
+                line_dash="vacance",
+                facet_col="gestion",
+                markers=True,
+                labels={
+                    "taux_credit": "Taux",
+                    "cashflow_mensuel_apres_impot": "Cash-flow mensuel",
+                    "duree_credit": "Duree",
+                    "vacance": "Vacance",
+                    "gestion": "Gestion",
+                },
+            )
+            st.plotly_chart(fig, width="stretch")
 
-    distribution = df.copy()
-    distribution["gestion"] = distribution["gestion_agence"].map(_gestion_label)
-    hist = px.histogram(
-        distribution,
-        x="cashflow_mensuel_apres_impot",
-        color="gestion",
-        nbins=40,
-        labels={
-            "cashflow_mensuel_apres_impot": "Cash-flow mensuel annee 1",
-            "gestion": "Gestion",
-        },
-    )
-    st.plotly_chart(hist, width="stretch")
+        distribution = df.copy()
+        distribution["gestion"] = distribution["gestion_agence"].map(_gestion_label)
+        hist = px.histogram(
+            distribution,
+            x="cashflow_mensuel_apres_impot",
+            color="gestion",
+            nbins=40,
+            labels={
+                "cashflow_mensuel_apres_impot": "Cash-flow mensuel annee 1",
+                "gestion": "Gestion",
+            },
+        )
+        st.plotly_chart(hist, width="stretch")
 
 
 def _plot_heatmap(df: pd.DataFrame, value: str, label: str) -> None:
@@ -1378,8 +1857,14 @@ def _decision_map(
 
 
 def _comparison_page(conn, rows: list[dict[str, Any]], annonce: AnnonceRecord | None) -> None:
-    st.subheader("Comparaison et decision")
+    st.subheader(PORTFOLIO_DECISION_LABEL)
+    st.caption("Compare uniquement les annonces pour lesquelles un snapshot de simulation a ete sauvegarde.")
     runs = list_simulation_runs(conn)
+    status_by_annonce = {
+        int(row["id"]): str(row.get("statut") or "")
+        for row in rows
+        if row.get("id") is not None
+    }
     if runs:
         latest_by_annonce: dict[int, dict[str, Any]] = {}
         for run in runs:
@@ -1388,54 +1873,57 @@ def _comparison_page(conn, rows: list[dict[str, Any]], annonce: AnnonceRecord | 
         for run in latest_by_annonce.values():
             results = get_simulation_results(conn, int(run["id"]))
             if results:
-                best = results[0]
+                best = dict(results[0])
                 robustesse = analyser_grille(results)
+                annonce_id = int(run["annonce_id"])
                 best["ville"] = run["ville"]
                 best["quartier"] = run["quartier"]
                 best["run_id"] = run["id"]
+                best["statut"] = status_by_annonce.get(annonce_id, "")
                 best["decision_robuste"] = robustesse.decision
+                best["meilleure_strategie"] = " / ".join(
+                    value for value in (str(best.get("mode_location") or ""), str(best.get("regime_fiscal") or "")) if value
+                )
+                best["cashflow_prudent"] = robustesse.meilleur_cashflow_prudent
                 best["cashflow_median"] = robustesse.cashflow_median
                 best["pct_scenarios_viables"] = robustesse.pct_viables
-                best["nb_scenarios_viables"] = robustesse.nb_viables
                 best_rows.append(best)
         if best_rows:
             df = pd.DataFrame(best_rows)
+            decision_cols = [
+                "ville",
+                "quartier",
+                "statut",
+                "decision_robuste",
+                "meilleure_strategie",
+                "tri_annuel_pct",
+                "patrimoine_net_sortie",
+                "cashflow_prudent",
+                "cashflow_median",
+                "pct_scenarios_viables",
+                "score",
+                "run_id",
+            ]
+            visible_cols = [col for col in decision_cols if col in df.columns]
+            sort_cols = [col for col in ("score", "patrimoine_net_sortie", "cashflow_prudent") if col in df.columns]
             st.dataframe(
-                df[
-                    [
-                        "ville",
-                        "quartier",
-                        "decision_robuste",
-                        "cashflow_median",
-                        "pct_scenarios_viables",
-                        "nb_scenarios_viables",
-                        "score",
-                        "prix_achat",
-                        "loyer_hc_mensuel",
-                        "cashflow_mensuel_apres_impot",
-                        "effort_epargne_mensuel",
-                        "montant_emprunte",
-                        "mensualite_totale",
-                        "rendement_net_net_pct",
-                        "taux_credit",
-                        "duree_annees",
-                        "apport",
-                        "vacance_mois",
-                        "gestion_agence",
-                        "frais_gestion_pct",
-                        "run_id",
-                    ]
-                ].sort_values(["score", "cashflow_mensuel_apres_impot"], ascending=False),
+                df[visible_cols].sort_values(sort_cols, ascending=False) if sort_cols else df[visible_cols],
                 hide_index=True,
                 width="stretch",
             )
+        else:
+            st.info("Sauvegarde un snapshot depuis Simulations pour comparer les annonces.")
     else:
-        st.info("Aucun snapshot sauvegarde. Tu peux deja analyser en direct dans l'onglet Simulations.")
+        st.info("Sauvegarde un snapshot depuis Simulations pour comparer les annonces.")
 
     if annonce is None:
         return
     st.divider()
-    st.subheader("Decision sur l'annonce active")
+    st.subheader("Statut de l'annonce active")
+    st.caption(
+        "Ce statut sert au suivi de ton pipeline personnel : a analyser, a visiter, a negocier, favori, "
+        "rejete ou archive."
+    )
     with st.form("decision_form"):
         statut = st.selectbox(
             "Statut",
@@ -1475,7 +1963,7 @@ def main() -> None:
     annonce, hypotheses = _load_bundle(conn, selected_id)
 
     tab_dashboard, tab_annonce, tab_hypotheses, tab_simulation, tab_comparison, tab_history = st.tabs(
-        ["Tableau de bord", "Annonce", "Hypotheses", "Simulations", "Comparaison", "Historique"]
+        ["Tableau de bord", "Annonce", "Hypotheses", "Simulation", PORTFOLIO_DECISION_LABEL, "Historique"]
     )
 
     with tab_dashboard:

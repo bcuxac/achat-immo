@@ -14,7 +14,6 @@ import unicodedata
 from achat_immo.city_profiles import loyer_max_hc_mensuel, profile_for_city
 from achat_immo.models import (
     BienImmobilier,
-    EpoqueConstruction,
     ModeLocation,
     RegimeFiscal,
     TypeBien,
