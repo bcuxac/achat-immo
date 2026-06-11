@@ -1,3 +1,4 @@
+from achat_immo import taxes
 from achat_immo.models import BienImmobilier, Fiscalite, RegimeFiscal, TypeBien
 from achat_immo.taxes import (
     EtatFiscal,
@@ -8,6 +9,10 @@ from achat_immo.taxes import (
     fiscalite_lmnp_reel,
     resultat_fiscal,
 )
+from achat_immo.taxes_lmnp import amortissement_lmnp as lmnp_amortissement_lmnp
+from achat_immo.taxes_location_nue import fiscalite_location_nue as location_nue_reelle
+from achat_immo.taxes_micro import fiscalite_micro_bic as micro_bic
+from achat_immo.taxes_plus_value import calcul_plus_value as plus_value_calcul
 
 
 def test_amortissement_lmnp_separe_bien_travaux_meubles() -> None:
@@ -161,3 +166,10 @@ def test_plus_value_abattements_et_reintegration_lmnp() -> None:
     assert plus_value.abattement_ir_pct == 30
     assert plus_value.impot_total == 13_668.07
     assert moins_value.impot_total == 0
+
+
+def test_taxes_facade_reexporte_les_modules_fiscaux() -> None:
+    assert taxes.amortissement_lmnp is lmnp_amortissement_lmnp
+    assert taxes.fiscalite_location_nue is location_nue_reelle
+    assert taxes.fiscalite_micro_bic is micro_bic
+    assert taxes.calcul_plus_value is plus_value_calcul
