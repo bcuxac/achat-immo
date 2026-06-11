@@ -86,3 +86,26 @@ def test_location_nue_neutralise_le_budget_meubles_saisi() -> None:
     assert resultat.mode_location == ModeLocation.NUE
     assert resultat.bien.meubles_estimes == 0.0
     assert resultat.cout_total_projet == 123_800
+
+
+def test_simulation_expose_les_details_annuels_et_la_sortie() -> None:
+    horizon = 5
+
+    resultat = simuler_bien_sur_horizon(
+        bien=_bien_grenoble(),
+        location=HypothesesLocation(loyer_hc_mensuel=700, taxe_fonciere=900),
+        financement=Financement(apport=18_000),
+        fiscalite=Fiscalite(),
+        scenario=scenario_central(horizon_annees=horizon),
+    )
+
+    derniere_ligne = resultat.projection_annuelle[-1]
+
+    assert len(resultat.fiscalite_annuelle) == horizon
+    assert len(resultat.amortissements_fiscaux) == horizon
+    assert resultat.fiscalite_annuelle[0]["regime"] == RegimeFiscal.LMNP_REEL.value
+    assert resultat.amortissements_fiscaux[0]["dotation_totale"] > 0
+    assert derniere_ligne["flux_sortie_tri"] == resultat.flux_sortie_net
+    assert derniere_ligne["impot_plus_value"] == resultat.impot_plus_value
+    assert resultat.plus_value["impot_total"] == resultat.impot_plus_value
+    assert resultat.patrimoine_net_horizon == resultat.patrimoine_net_sortie
