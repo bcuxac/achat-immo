@@ -1,0 +1,331 @@
+"""Schema SQL et migrations de stockage."""
+
+from __future__ import annotations
+
+from achat_immo.storage_connection import DatabaseConnection
+
+
+def init_db(conn: DatabaseConnection) -> None:
+    """Cree le schema minimal de l'application."""
+
+    if conn.is_postgres:
+        conn.executescript(_POSTGRES_SCHEMA)
+    else:
+        conn.executescript(_SQLITE_SCHEMA)
+    _migrate_annonces(conn)
+    _migrate_hypotheses_achat(conn)
+    _migrate_simulation_results(conn)
+    conn.commit()
+
+
+_SQLITE_SCHEMA = """
+        CREATE TABLE IF NOT EXISTS annonces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date_creation TEXT NOT NULL,
+            url TEXT NOT NULL DEFAULT '',
+            ville TEXT NOT NULL,
+            quartier TEXT NOT NULL DEFAULT '',
+            adresse TEXT NOT NULL DEFAULT '',
+            type_bien TEXT NOT NULL,
+            nb_pieces INTEGER,
+            epoque_construction TEXT NOT NULL DEFAULT 'inconnue',
+            secteur_encadrement TEXT NOT NULL DEFAULT '',
+            surface_m2 REAL NOT NULL,
+            prix_affiche REAL NOT NULL,
+            prix_negocie REAL,
+            dpe TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            statut TEXT NOT NULL DEFAULT 'a_analyser',
+            notes TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS hypotheses_achat (
+            annonce_id INTEGER PRIMARY KEY,
+            frais_agence_achat REAL NOT NULL DEFAULT 0,
+            frais_notaire_estimes REAL NOT NULL DEFAULT 0,
+            travaux_estimes REAL NOT NULL DEFAULT 0,
+            meubles_estimes REAL NOT NULL DEFAULT 0,
+            frais_bancaires REAL NOT NULL DEFAULT 0,
+            garantie REAL NOT NULL DEFAULT 0,
+            loyer_hc_mensuel REAL NOT NULL DEFAULT 650,
+            mode_location TEXT NOT NULL DEFAULT 'meublee',
+            charges_copro_annuelles REAL NOT NULL DEFAULT 0,
+            charges_recuperables_annuelles REAL NOT NULL DEFAULT 0,
+            taxe_fonciere REAL NOT NULL DEFAULT 0,
+            assurance_pno REAL NOT NULL DEFAULT 180,
+            assurance_gli REAL NOT NULL DEFAULT 0,
+            frais_gestion_pct REAL NOT NULL DEFAULT 7,
+            cfe_annuelle REAL NOT NULL DEFAULT 0,
+            comptable_lmnp REAL NOT NULL DEFAULT 500,
+            entretien_annuel REAL NOT NULL DEFAULT 500,
+            regime_fiscal TEXT NOT NULL DEFAULT 'lmnp_reel',
+            tmi_pct REAL NOT NULL DEFAULT 30,
+            prelevements_sociaux_pct REAL NOT NULL DEFAULT 18.6,
+            part_terrain_pct REAL NOT NULL DEFAULT 15,
+            duree_amortissement_bien_annees INTEGER NOT NULL DEFAULT 30,
+            duree_amortissement_travaux_annees INTEGER NOT NULL DEFAULT 15,
+            duree_amortissement_meubles_annees INTEGER NOT NULL DEFAULT 7,
+            abattement_micro_bic_pct REAL NOT NULL DEFAULT 50,
+            abattement_micro_foncier_pct REAL NOT NULL DEFAULT 30,
+            gestion_agence_possible INTEGER NOT NULL DEFAULT 1,
+            apport_reference REAL NOT NULL DEFAULT 15000,
+            taux_credit_reference REAL NOT NULL DEFAULT 3.6,
+            duree_credit_reference INTEGER NOT NULL DEFAULT 20,
+            assurance_emprunteur_pct REAL NOT NULL DEFAULT 0.30,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS simulation_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            annonce_id INTEGER NOT NULL,
+            date_run TEXT NOT NULL,
+            commentaire TEXT NOT NULL DEFAULT '',
+            nb_resultats INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS simulation_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            annonce_id INTEGER NOT NULL,
+            scenario TEXT NOT NULL,
+            mode_location TEXT NOT NULL DEFAULT '',
+            regime_fiscal TEXT NOT NULL DEFAULT '',
+            prix_achat REAL NOT NULL DEFAULT 0,
+            cout_total_projet REAL NOT NULL DEFAULT 0,
+            loyer_hc_mensuel REAL NOT NULL,
+            taux_credit REAL NOT NULL,
+            duree_annees INTEGER NOT NULL,
+            apport REAL NOT NULL,
+            vacance_mois REAL NOT NULL,
+            gestion_agence INTEGER NOT NULL,
+            frais_gestion_pct REAL NOT NULL DEFAULT 0,
+            montant_emprunte REAL NOT NULL,
+            mensualite_totale REAL NOT NULL,
+            cashflow_mensuel_avant_impot REAL NOT NULL,
+            cashflow_mensuel_apres_impot REAL NOT NULL,
+            effort_epargne_mensuel REAL NOT NULL,
+            rendement_net_avant_impot_pct REAL NOT NULL,
+            rendement_net_net_pct REAL NOT NULL,
+            tri_annuel_pct REAL,
+            van REAL,
+            cash_on_cash_return_pct REAL,
+            impots_total_horizon REAL NOT NULL DEFAULT 0,
+            impot_plus_value REAL NOT NULL DEFAULT 0,
+            patrimoine_net_horizon REAL NOT NULL,
+            patrimoine_net_sortie REAL NOT NULL DEFAULT 0,
+            break_even_year INTEGER,
+            nb_annees_cashflow_negatif INTEGER NOT NULL DEFAULT 0,
+            score INTEGER NOT NULL,
+            decision TEXT NOT NULL,
+            alertes TEXT NOT NULL DEFAULT '',
+            diagnostics TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+        """
+
+
+_POSTGRES_SCHEMA = """
+        CREATE TABLE IF NOT EXISTS annonces (
+            id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            date_creation TEXT NOT NULL,
+            url TEXT NOT NULL DEFAULT '',
+            ville TEXT NOT NULL,
+            quartier TEXT NOT NULL DEFAULT '',
+            adresse TEXT NOT NULL DEFAULT '',
+            type_bien TEXT NOT NULL,
+            nb_pieces INTEGER,
+            epoque_construction TEXT NOT NULL DEFAULT 'inconnue',
+            secteur_encadrement TEXT NOT NULL DEFAULT '',
+            surface_m2 DOUBLE PRECISION NOT NULL,
+            prix_affiche DOUBLE PRECISION NOT NULL,
+            prix_negocie DOUBLE PRECISION,
+            dpe TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            statut TEXT NOT NULL DEFAULT 'a_analyser',
+            notes TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS hypotheses_achat (
+            annonce_id INTEGER PRIMARY KEY,
+            frais_agence_achat DOUBLE PRECISION NOT NULL DEFAULT 0,
+            frais_notaire_estimes DOUBLE PRECISION NOT NULL DEFAULT 0,
+            travaux_estimes DOUBLE PRECISION NOT NULL DEFAULT 0,
+            meubles_estimes DOUBLE PRECISION NOT NULL DEFAULT 0,
+            frais_bancaires DOUBLE PRECISION NOT NULL DEFAULT 0,
+            garantie DOUBLE PRECISION NOT NULL DEFAULT 0,
+            loyer_hc_mensuel DOUBLE PRECISION NOT NULL DEFAULT 650,
+            mode_location TEXT NOT NULL DEFAULT 'meublee',
+            charges_copro_annuelles DOUBLE PRECISION NOT NULL DEFAULT 0,
+            charges_recuperables_annuelles DOUBLE PRECISION NOT NULL DEFAULT 0,
+            taxe_fonciere DOUBLE PRECISION NOT NULL DEFAULT 0,
+            assurance_pno DOUBLE PRECISION NOT NULL DEFAULT 180,
+            assurance_gli DOUBLE PRECISION NOT NULL DEFAULT 0,
+            frais_gestion_pct DOUBLE PRECISION NOT NULL DEFAULT 7,
+            cfe_annuelle DOUBLE PRECISION NOT NULL DEFAULT 0,
+            comptable_lmnp DOUBLE PRECISION NOT NULL DEFAULT 500,
+            entretien_annuel DOUBLE PRECISION NOT NULL DEFAULT 500,
+            regime_fiscal TEXT NOT NULL DEFAULT 'lmnp_reel',
+            tmi_pct DOUBLE PRECISION NOT NULL DEFAULT 30,
+            prelevements_sociaux_pct DOUBLE PRECISION NOT NULL DEFAULT 18.6,
+            part_terrain_pct DOUBLE PRECISION NOT NULL DEFAULT 15,
+            duree_amortissement_bien_annees INTEGER NOT NULL DEFAULT 30,
+            duree_amortissement_travaux_annees INTEGER NOT NULL DEFAULT 15,
+            duree_amortissement_meubles_annees INTEGER NOT NULL DEFAULT 7,
+            abattement_micro_bic_pct DOUBLE PRECISION NOT NULL DEFAULT 50,
+            abattement_micro_foncier_pct DOUBLE PRECISION NOT NULL DEFAULT 30,
+            gestion_agence_possible INTEGER NOT NULL DEFAULT 1,
+            apport_reference DOUBLE PRECISION NOT NULL DEFAULT 15000,
+            taux_credit_reference DOUBLE PRECISION NOT NULL DEFAULT 3.6,
+            duree_credit_reference INTEGER NOT NULL DEFAULT 20,
+            assurance_emprunteur_pct DOUBLE PRECISION NOT NULL DEFAULT 0.30,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS simulation_runs (
+            id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            annonce_id INTEGER NOT NULL,
+            date_run TEXT NOT NULL,
+            commentaire TEXT NOT NULL DEFAULT '',
+            nb_resultats INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS simulation_results (
+            id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            run_id INTEGER NOT NULL,
+            annonce_id INTEGER NOT NULL,
+            scenario TEXT NOT NULL,
+            mode_location TEXT NOT NULL DEFAULT '',
+            regime_fiscal TEXT NOT NULL DEFAULT '',
+            prix_achat DOUBLE PRECISION NOT NULL DEFAULT 0,
+            cout_total_projet DOUBLE PRECISION NOT NULL DEFAULT 0,
+            loyer_hc_mensuel DOUBLE PRECISION NOT NULL,
+            taux_credit DOUBLE PRECISION NOT NULL,
+            duree_annees INTEGER NOT NULL,
+            apport DOUBLE PRECISION NOT NULL,
+            vacance_mois DOUBLE PRECISION NOT NULL,
+            gestion_agence INTEGER NOT NULL,
+            frais_gestion_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+            montant_emprunte DOUBLE PRECISION NOT NULL,
+            mensualite_totale DOUBLE PRECISION NOT NULL,
+            cashflow_mensuel_avant_impot DOUBLE PRECISION NOT NULL,
+            cashflow_mensuel_apres_impot DOUBLE PRECISION NOT NULL,
+            effort_epargne_mensuel DOUBLE PRECISION NOT NULL,
+            rendement_net_avant_impot_pct DOUBLE PRECISION NOT NULL,
+            rendement_net_net_pct DOUBLE PRECISION NOT NULL,
+            tri_annuel_pct DOUBLE PRECISION,
+            van DOUBLE PRECISION,
+            cash_on_cash_return_pct DOUBLE PRECISION,
+            impots_total_horizon DOUBLE PRECISION NOT NULL DEFAULT 0,
+            impot_plus_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+            patrimoine_net_horizon DOUBLE PRECISION NOT NULL,
+            patrimoine_net_sortie DOUBLE PRECISION NOT NULL DEFAULT 0,
+            break_even_year INTEGER,
+            nb_annees_cashflow_negatif INTEGER NOT NULL DEFAULT 0,
+            score INTEGER NOT NULL,
+            decision TEXT NOT NULL,
+            alertes TEXT NOT NULL DEFAULT '',
+            diagnostics TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (annonce_id) REFERENCES annonces(id) ON DELETE CASCADE
+        );
+        """
+
+
+def _table_columns(conn: DatabaseConnection, table: str) -> set[str]:
+    if conn.is_postgres:
+        rows = conn.execute(
+            """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = ?
+            """,
+            (table,),
+        ).fetchall()
+        return {str(row["name"]) for row in rows}
+
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _migrate_annonces(conn: DatabaseConnection) -> None:
+    """Ajoute les colonnes locales aux bases deja creees."""
+
+    columns = _table_columns(conn, "annonces")
+    migrations = {
+        "nb_pieces": "ALTER TABLE annonces ADD COLUMN nb_pieces INTEGER",
+        "epoque_construction": "ALTER TABLE annonces ADD COLUMN epoque_construction TEXT NOT NULL DEFAULT 'inconnue'",
+        "secteur_encadrement": "ALTER TABLE annonces ADD COLUMN secteur_encadrement TEXT NOT NULL DEFAULT ''",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def _migrate_hypotheses_achat(conn: DatabaseConnection) -> None:
+    """Ajoute les hypotheses de location aux bases deja creees."""
+
+    columns = _table_columns(conn, "hypotheses_achat")
+    migrations = {
+        "mode_location": "ALTER TABLE hypotheses_achat ADD COLUMN mode_location TEXT NOT NULL DEFAULT 'meublee'",
+        "cfe_annuelle": "ALTER TABLE hypotheses_achat ADD COLUMN cfe_annuelle REAL NOT NULL DEFAULT 0",
+        "regime_fiscal": "ALTER TABLE hypotheses_achat ADD COLUMN regime_fiscal TEXT NOT NULL DEFAULT 'lmnp_reel'",
+        "tmi_pct": "ALTER TABLE hypotheses_achat ADD COLUMN tmi_pct REAL NOT NULL DEFAULT 30",
+        "prelevements_sociaux_pct": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN prelevements_sociaux_pct REAL NOT NULL DEFAULT 18.6"
+        ),
+        "part_terrain_pct": "ALTER TABLE hypotheses_achat ADD COLUMN part_terrain_pct REAL NOT NULL DEFAULT 15",
+        "duree_amortissement_bien_annees": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_bien_annees INTEGER NOT NULL DEFAULT 30"
+        ),
+        "duree_amortissement_travaux_annees": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_travaux_annees INTEGER NOT NULL DEFAULT 15"
+        ),
+        "duree_amortissement_meubles_annees": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN duree_amortissement_meubles_annees INTEGER NOT NULL DEFAULT 7"
+        ),
+        "abattement_micro_bic_pct": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN abattement_micro_bic_pct REAL NOT NULL DEFAULT 50"
+        ),
+        "abattement_micro_foncier_pct": (
+            "ALTER TABLE hypotheses_achat ADD COLUMN abattement_micro_foncier_pct REAL NOT NULL DEFAULT 30"
+        ),
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def _migrate_simulation_results(conn: DatabaseConnection) -> None:
+    """Ajoute les colonnes recentes aux bases locales deja creees."""
+
+    columns = _table_columns(conn, "simulation_results")
+    migrations = {
+        "loyer_hc_mensuel": "ALTER TABLE simulation_results ADD COLUMN loyer_hc_mensuel REAL NOT NULL DEFAULT 0",
+        "montant_emprunte": "ALTER TABLE simulation_results ADD COLUMN montant_emprunte REAL NOT NULL DEFAULT 0",
+        "diagnostics": "ALTER TABLE simulation_results ADD COLUMN diagnostics TEXT NOT NULL DEFAULT ''",
+        "prix_achat": "ALTER TABLE simulation_results ADD COLUMN prix_achat REAL NOT NULL DEFAULT 0",
+        "cout_total_projet": "ALTER TABLE simulation_results ADD COLUMN cout_total_projet REAL NOT NULL DEFAULT 0",
+        "mode_location": "ALTER TABLE simulation_results ADD COLUMN mode_location TEXT NOT NULL DEFAULT ''",
+        "regime_fiscal": "ALTER TABLE simulation_results ADD COLUMN regime_fiscal TEXT NOT NULL DEFAULT ''",
+        "tri_annuel_pct": "ALTER TABLE simulation_results ADD COLUMN tri_annuel_pct REAL",
+        "van": "ALTER TABLE simulation_results ADD COLUMN van REAL",
+        "cash_on_cash_return_pct": "ALTER TABLE simulation_results ADD COLUMN cash_on_cash_return_pct REAL",
+        "impots_total_horizon": (
+            "ALTER TABLE simulation_results ADD COLUMN impots_total_horizon REAL NOT NULL DEFAULT 0"
+        ),
+        "impot_plus_value": "ALTER TABLE simulation_results ADD COLUMN impot_plus_value REAL NOT NULL DEFAULT 0",
+        "patrimoine_net_sortie": (
+            "ALTER TABLE simulation_results ADD COLUMN patrimoine_net_sortie REAL NOT NULL DEFAULT 0"
+        ),
+        "break_even_year": "ALTER TABLE simulation_results ADD COLUMN break_even_year INTEGER",
+        "nb_annees_cashflow_negatif": (
+            "ALTER TABLE simulation_results ADD COLUMN nb_annees_cashflow_negatif INTEGER NOT NULL DEFAULT 0"
+        ),
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
