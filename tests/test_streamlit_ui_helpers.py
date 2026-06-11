@@ -52,13 +52,32 @@ def test_streamlit_imports_current_engine_api() -> None:
     assert "taux_actualisation_pct" in scenario_params
     assert {"fiscalite", "gestion_agence_possible"} <= set(count_params)
     assert {"fiscalite", "scenario_base", "gestion_agence_possible"} <= set(simulate_params)
+    assert ui.grids_module is sys.modules["achat_immo.grids"]
+    assert ui.models_module is sys.modules["achat_immo.models"]
+    assert ui.GrilleParametres is ui.grids_module.GrilleParametres
+    assert ui.Scenario is ui.models_module.Scenario
+    assert ui.compter_scenarios_grille is ui.grids_module.compter_scenarios_grille
 
 
-def test_force_repo_source_package_removes_foreign_cached_modules(tmp_path) -> None:
+def test_force_fresh_repo_source_package_removes_foreign_cached_modules(tmp_path) -> None:
     module = ModuleType("dummy_package")
     module.__file__ = str(tmp_path / "dummy_package" / "__init__.py")
     sys.modules["dummy_package"] = module
 
-    ui._force_repo_source_package("dummy_package")
+    ui._force_fresh_repo_source_package("dummy_package")
 
     assert "dummy_package" not in sys.modules
+
+
+def test_force_fresh_repo_source_package_removes_same_path_cached_modules() -> None:
+    package = ModuleType("dummy_package")
+    package.__file__ = str(ui.SRC_PATH / "dummy_package" / "__init__.py")
+    submodule = ModuleType("dummy_package.models")
+    submodule.__file__ = str(ui.SRC_PATH / "dummy_package" / "models.py")
+    sys.modules["dummy_package"] = package
+    sys.modules["dummy_package.models"] = submodule
+
+    ui._force_fresh_repo_source_package("dummy_package")
+
+    assert "dummy_package" not in sys.modules
+    assert "dummy_package.models" not in sys.modules

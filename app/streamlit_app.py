@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import hashlib
-from inspect import signature
+import importlib
+from inspect import getsourcefile, signature
 import os
 from pathlib import Path
 import sys
@@ -22,22 +23,17 @@ if SRC_PATH_STR in sys.path:
 sys.path.insert(0, SRC_PATH_STR)
 
 
-def _force_repo_source_package(package_name: str) -> None:
-    expected_root = (SRC_PATH / package_name).resolve()
-    for module_name, module in list(sys.modules.items()):
+def _force_fresh_repo_source_package(package_name: str) -> None:
+    """Supprime les modules locaux deja charges pour forcer une lecture du source courant."""
+
+    importlib.invalidate_caches()
+    for module_name in list(sys.modules):
         if module_name != package_name and not module_name.startswith(f"{package_name}."):
             continue
-        module_file = getattr(module, "__file__", None)
-        if module_file is None:
-            del sys.modules[module_name]
-            continue
-        try:
-            Path(module_file).resolve().relative_to(expected_root)
-        except ValueError:
-            del sys.modules[module_name]
+        del sys.modules[module_name]
 
 
-_force_repo_source_package("achat_immo")
+_force_fresh_repo_source_package("achat_immo")
 
 from achat_immo import grids as grids_module
 from achat_immo import models as models_module
@@ -438,8 +434,39 @@ def _short_file_sha(path: str | None) -> str:
         return "illisible"
 
 
+def _runtime_object_detail(label: str, obj: Any) -> str:
+    try:
+        obj_signature = str(signature(obj))
+    except (TypeError, ValueError):
+        obj_signature = "n/a"
+    return (
+        f"{label}: type={type(obj).__name__}, module={getattr(obj, '__module__', 'inconnu')}, "
+        f"id={id(obj)}, source={getsourcefile(obj) or 'inconnu'}, signature={obj_signature}, repr={obj!r}"
+    )
+
+
+def _runtime_module_detail(label: str, module: Any) -> str:
+    if module is None:
+        return f"{label}: absent de sys.modules"
+    checked_attrs = (
+        "GRID_API_VERSION",
+        "MODEL_API_VERSION",
+        "GrilleParametres",
+        "Scenario",
+        "compter_scenarios_grille",
+        "simuler_grille_annonce",
+    )
+    present_attrs = [attr for attr in checked_attrs if hasattr(module, attr)]
+    return (
+        f"{label}: type={type(module).__name__}, id={id(module)}, "
+        f"file={getattr(module, '__file__', 'inconnu')}, attrs_presents={present_attrs}"
+    )
+
+
 def _runtime_api_errors() -> list[str]:
     errors: list[str] = []
+    loaded_grids_module = sys.modules.get("achat_immo.grids")
+    loaded_models_module = sys.modules.get("achat_immo.models")
     grille_params = signature(GrilleParametres).parameters
     scenario_params = signature(Scenario).parameters
     count_params = signature(compter_scenarios_grille).parameters
@@ -462,9 +489,17 @@ def _runtime_api_errors() -> list[str]:
     for parameter_name in ("fiscalite", "scenario_base", "gestion_agence_possible"):
         if parameter_name not in simulate_params:
             errors.append(f"simuler_grille_annonce ne supporte pas {parameter_name}.")
+    if grids_module is not loaded_grids_module:
+        errors.append("grids_module ne correspond pas a sys.modules['achat_immo.grids'].")
+    if models_module is not loaded_models_module:
+        errors.append("models_module ne correspond pas a sys.modules['achat_immo.models'].")
+    if GrilleParametres is not getattr(grids_module, "GrilleParametres", None):
+        errors.append("GrilleParametres ne vient pas de grids_module.GrilleParametres.")
+    if Scenario is not getattr(models_module, "Scenario", None):
+        errors.append("Scenario ne vient pas de models_module.Scenario.")
+    if compter_scenarios_grille is not getattr(grids_module, "compter_scenarios_grille", None):
+        errors.append("compter_scenarios_grille ne vient pas de grids_module.compter_scenarios_grille.")
     if errors:
-        loaded_grids_module = sys.modules.get("achat_immo.grids")
-        loaded_models_module = sys.modules.get("achat_immo.models")
         app_file = __file__
         grids_file = getattr(loaded_grids_module, "__file__", None)
         models_file = getattr(loaded_models_module, "__file__", None)
@@ -476,6 +511,14 @@ def _runtime_api_errors() -> list[str]:
         errors.append(f"achat_immo.models charge depuis : {models_file or 'inconnu'}")
         errors.append(f"achat_immo.models sha256 court : {_short_file_sha(models_file)}")
         errors.append(f"src attendu : {SRC_PATH}")
+        errors.append(_runtime_module_detail("grids_module importe", grids_module))
+        errors.append(_runtime_module_detail("achat_immo.grids charge", loaded_grids_module))
+        errors.append(_runtime_module_detail("models_module importe", models_module))
+        errors.append(_runtime_module_detail("achat_immo.models charge", loaded_models_module))
+        errors.append(_runtime_object_detail("GrilleParametres importe", GrilleParametres))
+        errors.append(_runtime_object_detail("Scenario importe", Scenario))
+        errors.append(_runtime_object_detail("compter_scenarios_grille importe", compter_scenarios_grille))
+        errors.append(_runtime_object_detail("simuler_grille_annonce importe", simuler_grille_annonce))
     return errors
 
 
