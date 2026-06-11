@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from app import streamlit_app as ui
 from achat_immo.models import ModeLocation, RegimeFiscal
 
@@ -33,3 +35,24 @@ def test_derived_fiscal_values_use_regime_constants() -> None:
 def test_guided_interface_section_labels_are_centralized() -> None:
     assert ui.SIMULATION_SECTION_LABELS == ("Exploitation", "Strategies testees", "Analyse")
     assert ui.PORTFOLIO_DECISION_LABEL == "Decision portefeuille"
+
+
+def test_grille_parametres_builder_filters_unknown_legacy_fields(monkeypatch) -> None:
+    @dataclass(frozen=True)
+    class LegacyGrilleParametres:
+        prix_achats: tuple[float, ...] = ()
+        comparer_regimes: bool = False
+
+    monkeypatch.setattr(ui, "GrilleParametres", LegacyGrilleParametres)
+
+    params = ui._build_grille_parametres(
+        prix_achats=(100_000.0,),
+        comparer_regimes=True,
+        modes_location=(ModeLocation.MEUBLEE,),
+        regimes_fiscaux=(RegimeFiscal.LMNP_REEL,),
+    )
+
+    assert params == LegacyGrilleParametres(
+        prix_achats=(100_000.0,),
+        comparer_regimes=True,
+    )

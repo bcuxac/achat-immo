@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 import os
 from pathlib import Path
 import sys
@@ -410,6 +410,16 @@ def _as_float_tuple(values: list[float]) -> tuple[float, ...]:
 
 def _as_int_tuple(values: list[int]) -> tuple[int, ...]:
     return tuple(int(value) for value in values)
+
+
+def _build_grille_parametres(**kwargs: Any) -> GrilleParametres:
+    accepted_fields = {field.name for field in fields(GrilleParametres)}
+    filtered_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key in accepted_fields
+    }
+    return GrilleParametres(**filtered_kwargs)
 
 
 def _enum_label(value: Any) -> str:
@@ -1208,7 +1218,7 @@ def _simulation_inputs(
         loyer_hc_mensuel=float(loyers[0]) if loyers else location.loyer_hc_mensuel,
         frais_gestion_pct=float(frais_gestion[0]) if frais_gestion else 7.0,
     )
-    params = GrilleParametres(
+    params = _build_grille_parametres(
         prix_achats=_as_float_tuple(list(prix_achats)),
         loyers_hc_mensuels=_as_float_tuple(list(loyers)),
         taux_credit=_as_float_tuple(taux),
