@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from inspect import signature
 
 from app import streamlit_app as ui
 from achat_immo.models import ModeLocation, RegimeFiscal
@@ -37,37 +37,14 @@ def test_guided_interface_section_labels_are_centralized() -> None:
     assert ui.PORTFOLIO_DECISION_LABEL == "Decision portefeuille"
 
 
-def test_grille_parametres_builder_filters_unknown_legacy_fields(monkeypatch) -> None:
-    @dataclass(frozen=True)
-    class LegacyGrilleParametres:
-        prix_achats: tuple[float, ...] = ()
-        comparer_regimes: bool = False
+def test_streamlit_imports_current_engine_api() -> None:
+    assert not ui._runtime_api_errors()
+    grille_params = signature(ui.GrilleParametres).parameters
+    scenario_params = signature(ui.Scenario).parameters
+    count_params = signature(ui.compter_scenarios_grille).parameters
+    simulate_params = signature(ui.simuler_grille_annonce).parameters
 
-    monkeypatch.setattr(ui, "GrilleParametres", LegacyGrilleParametres)
-
-    params = ui._build_grille_parametres(
-        prix_achats=(100_000.0,),
-        comparer_regimes=True,
-        modes_location=(ModeLocation.MEUBLEE,),
-        regimes_fiscaux=(RegimeFiscal.LMNP_REEL,),
-    )
-
-    assert params == LegacyGrilleParametres(
-        prix_achats=(100_000.0,),
-        comparer_regimes=True,
-    )
-
-
-def test_scenario_builder_filters_unknown_legacy_fields(monkeypatch) -> None:
-    @dataclass(frozen=True)
-    class LegacyScenario:
-        horizon_annees: int = 10
-
-    monkeypatch.setattr(ui, "Scenario", LegacyScenario)
-
-    scenario = ui._build_scenario(
-        horizon_annees=12,
-        taux_actualisation_pct=4.5,
-    )
-
-    assert scenario == LegacyScenario(horizon_annees=12)
+    assert {"modes_location", "regimes_fiscaux", "comparer_regimes", "appliquer_plafond_loyer"} <= set(grille_params)
+    assert "taux_actualisation_pct" in scenario_params
+    assert {"fiscalite", "gestion_agence_possible"} <= set(count_params)
+    assert {"fiscalite", "scenario_base", "gestion_agence_possible"} <= set(simulate_params)

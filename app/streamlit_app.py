@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, fields, replace
+from dataclasses import asdict, replace
+from inspect import signature
 import os
 from pathlib import Path
 import sys
@@ -292,17 +293,9 @@ def derived_fiscalite_values(regime_fiscal: RegimeFiscal) -> dict[str, float | b
         "prelevements_sociaux_pct": prelevements_sociaux_par_regime(regime_fiscal),
         "abattement_micro_bic_pct": defaults.abattement_micro_bic_pct,
         "abattement_micro_foncier_pct": defaults.abattement_micro_foncier_pct,
-        "taux_impot_plus_value_pct": getattr(defaults, "taux_impot_plus_value_pct", 19.0),
-        "taux_prelevements_sociaux_plus_value_pct": getattr(
-            defaults,
-            "taux_prelevements_sociaux_plus_value_pct",
-            17.2,
-        ),
-        "reintegrer_amortissements_lmnp_plus_value": getattr(
-            defaults,
-            "reintegrer_amortissements_lmnp_plus_value",
-            True,
-        ),
+        "taux_impot_plus_value_pct": defaults.taux_impot_plus_value_pct,
+        "taux_prelevements_sociaux_plus_value_pct": defaults.taux_prelevements_sociaux_plus_value_pct,
+        "reintegrer_amortissements_lmnp_plus_value": defaults.reintegrer_amortissements_lmnp_plus_value,
     }
 
 
@@ -412,24 +405,35 @@ def _as_int_tuple(values: list[int]) -> tuple[int, ...]:
     return tuple(int(value) for value in values)
 
 
-def _build_grille_parametres(**kwargs: Any) -> GrilleParametres:
-    accepted_fields = {field.name for field in fields(GrilleParametres)}
-    filtered_kwargs = {
-        key: value
-        for key, value in kwargs.items()
-        if key in accepted_fields
-    }
-    return GrilleParametres(**filtered_kwargs)
+def _runtime_api_errors() -> list[str]:
+    errors: list[str] = []
+    grille_params = signature(GrilleParametres).parameters
+    scenario_params = signature(Scenario).parameters
+    count_params = signature(compter_scenarios_grille).parameters
+    simulate_params = signature(simuler_grille_annonce).parameters
+
+    for field_name in ("modes_location", "regimes_fiscaux", "comparer_regimes", "appliquer_plafond_loyer"):
+        if field_name not in grille_params:
+            errors.append(f"GrilleParametres ne contient pas {field_name}.")
+    if "taux_actualisation_pct" not in scenario_params:
+        errors.append("Scenario ne contient pas taux_actualisation_pct.")
+    for parameter_name in ("fiscalite", "gestion_agence_possible"):
+        if parameter_name not in count_params:
+            errors.append(f"compter_scenarios_grille ne supporte pas {parameter_name}.")
+    for parameter_name in ("fiscalite", "scenario_base", "gestion_agence_possible"):
+        if parameter_name not in simulate_params:
+            errors.append(f"simuler_grille_annonce ne supporte pas {parameter_name}.")
+    return errors
 
 
-def _build_scenario(**kwargs: Any) -> Scenario:
-    accepted_fields = {field.name for field in fields(Scenario)}
-    filtered_kwargs = {
-        key: value
-        for key, value in kwargs.items()
-        if key in accepted_fields
-    }
-    return Scenario(**filtered_kwargs)
+def _require_current_runtime_api() -> None:
+    errors = _runtime_api_errors()
+    if not errors:
+        return
+    st.error("Le code Python charge par l'application n'est pas synchronise avec l'interface Streamlit.")
+    st.caption("Redeploie l'application avec le dernier commit et vide le cache de dependances si necessaire.")
+    st.code("\n".join(errors))
+    st.stop()
 
 
 def _enum_label(value: Any) -> str:
@@ -1228,7 +1232,7 @@ def _simulation_inputs(
         loyer_hc_mensuel=float(loyers[0]) if loyers else location.loyer_hc_mensuel,
         frais_gestion_pct=float(frais_gestion[0]) if frais_gestion else 7.0,
     )
-    params = _build_grille_parametres(
+    params = GrilleParametres(
         prix_achats=_as_float_tuple(list(prix_achats)),
         loyers_hc_mensuels=_as_float_tuple(list(loyers)),
         taux_credit=_as_float_tuple(taux),
@@ -1243,7 +1247,7 @@ def _simulation_inputs(
         regimes_fiscaux=tuple(regimes_fiscaux) if comparer_regimes else (),
         comparer_regimes=bool(comparer_regimes),
     )
-    scenario_base = _build_scenario(
+    scenario_base = Scenario(
         horizon_annees=int(horizon),
         taux_actualisation_pct=float(taux_actualisation),
     )
@@ -1981,6 +1985,7 @@ def main() -> None:
     st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
     _require_authentication()
     st.title("Simulateur d'Achat immobilier locatif")
+    _require_current_runtime_api()
 
     database_url = _configured_database_url()
     if database_url:

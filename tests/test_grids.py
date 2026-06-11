@@ -1,6 +1,3 @@
-from dataclasses import dataclass
-
-from achat_immo import grids
 from achat_immo.grids import (
     GrilleParametres,
     compter_scenarios_grille,
@@ -148,46 +145,3 @@ def test_grille_compare_meuble_et_nue_si_demande() -> None:
         RegimeFiscal.LOCATION_NUE_REEL,
         RegimeFiscal.MICRO_FONCIER,
     }
-
-
-def test_grille_supporte_parametres_et_scenario_legacy(monkeypatch) -> None:
-    @dataclass(frozen=True)
-    class LegacyParametres:
-        taux_credit: tuple[float, ...] = (3.6,)
-        durees_annees: tuple[int, ...] = (20,)
-        apports: tuple[float, ...] = (15_000.0,)
-        vacances_mois: tuple[float, ...] = (1.0,)
-        gestions_agence: tuple[bool, ...] = (False,)
-        frais_gestion_pct: tuple[float, ...] = (7.0,)
-        horizon_annees: int = 5
-        assurance_emprunteur_annuelle_pct: float = 0.3
-        prix_achats: tuple[float, ...] = ()
-        loyers_hc_mensuels: tuple[float, ...] = ()
-
-    @dataclass(frozen=True)
-    class LegacyScenario:
-        nom: str = "central"
-        horizon_annees: int = 5
-        appreciation_annuelle_pct: float = 0.5
-        loyer_multiplicateur: float = 1.0
-        charges_multiplicateur: float = 1.0
-        vacance_mois_par_an: float = 1.0
-        frais_revente_pct: float = 7.0
-
-    monkeypatch.setattr(grids, "Scenario", LegacyScenario)
-    bien = BienImmobilier(ville="Nimes", surface_m2=40, prix_affiche=90_000)
-    location = HypothesesLocation(loyer_hc_mensuel=620)
-
-    resultats = simuler_grille_annonce(
-        bien,
-        location,
-        parametres=LegacyParametres(),  # type: ignore[arg-type]
-        scenario_base=LegacyScenario(),  # type: ignore[arg-type]
-    )
-
-    assert len(resultats) == 2
-    assert compter_scenarios_grille(
-        bien,
-        location,
-        LegacyParametres(),  # type: ignore[arg-type]
-    ) == 2

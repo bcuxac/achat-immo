@@ -300,7 +300,7 @@ def simuler_bien_sur_horizon(
     projection[-1]["patrimoine_net"] = patrimoine_net_sortie
     flux_tri[-1] += flux_sortie_net
     tri = _tri_annuel_approx(flux_tri)
-    van = _van(flux_tri, getattr(scenario, "taux_actualisation_pct", 4.0))
+    van = _van(flux_tri, scenario.taux_actualisation_pct)
 
     premiere_annee = projection[1]
     rb = rendement_brut(bien, location_scenario)

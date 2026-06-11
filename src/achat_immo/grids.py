@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 from itertools import product
 from typing import Any
 
@@ -161,9 +161,8 @@ def _prelevements_sociaux_regime(regime: RegimeFiscal) -> float:
 
 
 def _modes_a_tester(location: HypothesesLocation, parametres: GrilleParametres) -> tuple[ModeLocation, ...]:
-    modes_location = getattr(parametres, "modes_location", ())
-    if modes_location:
-        return modes_location
+    if parametres.modes_location:
+        return parametres.modes_location
     return (location.mode_location,)
 
 
@@ -173,11 +172,10 @@ def _regimes_a_tester(
     parametres: GrilleParametres,
 ) -> tuple[RegimeFiscal, ...]:
     compatibles = regimes_compatibles_mode(mode_location)
-    if not getattr(parametres, "comparer_regimes", True):
+    if not parametres.comparer_regimes:
         return (fiscalite.regime,) if fiscalite.regime in compatibles else (compatibles[0],)
-    regimes_fiscaux = getattr(parametres, "regimes_fiscaux", ())
-    if regimes_fiscaux:
-        return tuple(regime for regime in regimes_fiscaux if regime in compatibles)
+    if parametres.regimes_fiscaux:
+        return tuple(regime for regime in parametres.regimes_fiscaux if regime in compatibles)
     return compatibles
 
 
@@ -202,11 +200,6 @@ def _location_pour_mode(location: HypothesesLocation, mode_location: ModeLocatio
     return replace(location, mode_location=ModeLocation.MEUBLEE)
 
 
-def _build_scenario(**kwargs: Any) -> Scenario:
-    accepted_fields = {field.name for field in fields(Scenario)}
-    return Scenario(**{key: value for key, value in kwargs.items() if key in accepted_fields})
-
-
 def simuler_grille_annonce(
     bien: BienImmobilier,
     location: HypothesesLocation,
@@ -223,7 +216,7 @@ def simuler_grille_annonce(
     gestions = parametres.gestions_agence if gestion_agence_possible else (False,)
     prix_achats = parametres.prix_achats or (bien.prix_achat,)
     loyers = parametres.loyers_hc_mensuels or (location.loyer_hc_mensuel,)
-    if getattr(parametres, "appliquer_plafond_loyer", True):
+    if parametres.appliquer_plafond_loyer:
         loyers = borner_loyers_hc(loyers, bien, location)
     modes = _modes_a_tester(location, parametres)
     resultats: list[GrilleResultat] = []
@@ -265,7 +258,7 @@ def simuler_grille_annonce(
                     regime=regime,
                     prelevements_sociaux_pct=_prelevements_sociaux_regime(regime),
                 )
-                scenario = _build_scenario(
+                scenario = Scenario(
                     nom=(
                         f"h{parametres.horizon_annees}_t{taux:g}_d{duree}"
                         f"_p{int(prix_achat)}_l{int(loyer)}_a{int(apport)}_v{vacance:g}_g{int(gestion)}"
@@ -277,7 +270,7 @@ def simuler_grille_annonce(
                     charges_multiplicateur=scenario_base.charges_multiplicateur,
                     vacance_mois_par_an=vacance,
                     frais_revente_pct=scenario_base.frais_revente_pct,
-                    taux_actualisation_pct=getattr(scenario_base, "taux_actualisation_pct", 4.0),
+                    taux_actualisation_pct=scenario_base.taux_actualisation_pct,
                 )
                 resultat = simuler_bien_sur_horizon(
                     bien=bien_scenario,
@@ -336,7 +329,7 @@ def compter_scenarios_grille(
 
     fiscalite = fiscalite or Fiscalite()
     loyers = parametres.loyers_hc_mensuels or (location.loyer_hc_mensuel,)
-    if getattr(parametres, "appliquer_plafond_loyer", True):
+    if parametres.appliquer_plafond_loyer:
         loyers = borner_loyers_hc(loyers, bien, location)
     gestions = parametres.gestions_agence if gestion_agence_possible else (False,)
     prix_achats = parametres.prix_achats or (bien.prix_achat,)
