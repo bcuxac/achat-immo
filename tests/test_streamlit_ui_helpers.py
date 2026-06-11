@@ -56,3 +56,18 @@ def test_grille_parametres_builder_filters_unknown_legacy_fields(monkeypatch) ->
         prix_achats=(100_000.0,),
         comparer_regimes=True,
     )
+
+
+def test_scenario_builder_filters_unknown_legacy_fields(monkeypatch) -> None:
+    @dataclass(frozen=True)
+    class LegacyScenario:
+        horizon_annees: int = 10
+
+    monkeypatch.setattr(ui, "Scenario", LegacyScenario)
+
+    scenario = ui._build_scenario(
+        horizon_annees=12,
+        taux_actualisation_pct=4.5,
+    )
+
+    assert scenario == LegacyScenario(horizon_annees=12)

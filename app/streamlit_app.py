@@ -422,6 +422,16 @@ def _build_grille_parametres(**kwargs: Any) -> GrilleParametres:
     return GrilleParametres(**filtered_kwargs)
 
 
+def _build_scenario(**kwargs: Any) -> Scenario:
+    accepted_fields = {field.name for field in fields(Scenario)}
+    filtered_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key in accepted_fields
+    }
+    return Scenario(**filtered_kwargs)
+
+
 def _enum_label(value: Any) -> str:
     return str(getattr(value, "value", value)).replace("_", " ")
 
@@ -1233,7 +1243,7 @@ def _simulation_inputs(
         regimes_fiscaux=tuple(regimes_fiscaux) if comparer_regimes else (),
         comparer_regimes=bool(comparer_regimes),
     )
-    scenario_base = Scenario(
+    scenario_base = _build_scenario(
         horizon_annees=int(horizon),
         taux_actualisation_pct=float(taux_actualisation),
     )
