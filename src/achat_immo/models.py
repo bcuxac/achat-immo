@@ -11,6 +11,9 @@ from enum import StrEnum
 from typing import Any
 
 
+MODEL_API_VERSION = "multi_regime_models_v1"
+
+
 class TypeBien(StrEnum):
     """Type de bien cible pour l'investissement."""
 

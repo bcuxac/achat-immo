@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+import hashlib
 from inspect import signature
 import os
 from pathlib import Path
@@ -38,6 +39,8 @@ def _force_repo_source_package(package_name: str) -> None:
 
 _force_repo_source_package("achat_immo")
 
+from achat_immo import grids as grids_module
+from achat_immo import models as models_module
 from achat_immo.auth import verify_password
 from achat_immo.grids import (
     GrilleResultat,
@@ -93,6 +96,9 @@ from achat_immo.storage import (
     update_decision,
 )
 
+
+EXPECTED_GRID_API_VERSION = "multi_regime_grid_v1"
+EXPECTED_MODEL_API_VERSION = "multi_regime_models_v1"
 
 STATUTS = [
     "a_analyser",
@@ -423,13 +429,28 @@ def _as_int_tuple(values: list[int]) -> tuple[int, ...]:
     return tuple(int(value) for value in values)
 
 
+def _short_file_sha(path: str | None) -> str:
+    if not path:
+        return "inconnu"
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "illisible"
+
+
 def _runtime_api_errors() -> list[str]:
     errors: list[str] = []
     grille_params = signature(GrilleParametres).parameters
     scenario_params = signature(Scenario).parameters
     count_params = signature(compter_scenarios_grille).parameters
     simulate_params = signature(simuler_grille_annonce).parameters
+    grid_api_version = getattr(grids_module, "GRID_API_VERSION", None)
+    model_api_version = getattr(models_module, "MODEL_API_VERSION", None)
 
+    if grid_api_version != EXPECTED_GRID_API_VERSION:
+        errors.append(f"GRID_API_VERSION={grid_api_version!r}, attendu {EXPECTED_GRID_API_VERSION!r}.")
+    if model_api_version != EXPECTED_MODEL_API_VERSION:
+        errors.append(f"MODEL_API_VERSION={model_api_version!r}, attendu {EXPECTED_MODEL_API_VERSION!r}.")
     for field_name in ("modes_location", "regimes_fiscaux", "comparer_regimes", "appliquer_plafond_loyer"):
         if field_name not in grille_params:
             errors.append(f"GrilleParametres ne contient pas {field_name}.")
@@ -442,10 +463,18 @@ def _runtime_api_errors() -> list[str]:
         if parameter_name not in simulate_params:
             errors.append(f"simuler_grille_annonce ne supporte pas {parameter_name}.")
     if errors:
-        grids_module = sys.modules.get("achat_immo.grids")
-        models_module = sys.modules.get("achat_immo.models")
-        errors.append(f"achat_immo.grids charge depuis : {getattr(grids_module, '__file__', 'inconnu')}")
-        errors.append(f"achat_immo.models charge depuis : {getattr(models_module, '__file__', 'inconnu')}")
+        loaded_grids_module = sys.modules.get("achat_immo.grids")
+        loaded_models_module = sys.modules.get("achat_immo.models")
+        app_file = __file__
+        grids_file = getattr(loaded_grids_module, "__file__", None)
+        models_file = getattr(loaded_models_module, "__file__", None)
+        errors.append(f"commit env : {os.environ.get('STREAMLIT_GIT_COMMIT') or os.environ.get('GITHUB_SHA') or 'inconnu'}")
+        errors.append(f"app chargee depuis : {app_file}")
+        errors.append(f"app sha256 court : {_short_file_sha(app_file)}")
+        errors.append(f"achat_immo.grids charge depuis : {grids_file or 'inconnu'}")
+        errors.append(f"achat_immo.grids sha256 court : {_short_file_sha(grids_file)}")
+        errors.append(f"achat_immo.models charge depuis : {models_file or 'inconnu'}")
+        errors.append(f"achat_immo.models sha256 court : {_short_file_sha(models_file)}")
         errors.append(f"src attendu : {SRC_PATH}")
     return errors
 

@@ -25,6 +25,9 @@ from achat_immo.models import (
 from achat_immo.scenarios import scenario_central, simuler_bien_sur_horizon
 
 
+GRID_API_VERSION = "multi_regime_grid_v1"
+
+
 def generer_plage_float(
     borne_min: float,
     borne_max: float,

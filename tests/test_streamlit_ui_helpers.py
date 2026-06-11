@@ -41,6 +41,8 @@ def test_guided_interface_section_labels_are_centralized() -> None:
 
 def test_streamlit_imports_current_engine_api() -> None:
     assert not ui._runtime_api_errors()
+    assert ui.grids_module.GRID_API_VERSION == ui.EXPECTED_GRID_API_VERSION
+    assert ui.models_module.MODEL_API_VERSION == ui.EXPECTED_MODEL_API_VERSION
     grille_params = signature(ui.GrilleParametres).parameters
     scenario_params = signature(ui.Scenario).parameters
     count_params = signature(ui.compter_scenarios_grille).parameters
