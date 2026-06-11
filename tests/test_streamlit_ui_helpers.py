@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from inspect import signature
+import subprocess
 import sys
 from types import ModuleType
 
@@ -81,3 +82,20 @@ def test_force_fresh_repo_source_package_removes_same_path_cached_modules() -> N
 
     assert "dummy_package" not in sys.modules
     assert "dummy_package.models" not in sys.modules
+
+
+def test_streamlit_app_imports_from_non_project_cwd(tmp_path) -> None:
+    script = (
+        "import os, runpy; "
+        f"os.chdir({str(tmp_path)!r}); "
+        f"runpy.run_path({str(ui.PROJECT_ROOT / 'app' / 'streamlit_app.py')!r}, run_name='streamlit_probe')"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
