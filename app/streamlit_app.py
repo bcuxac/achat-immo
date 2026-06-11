@@ -95,6 +95,7 @@ from achat_immo.storage import (
 
 EXPECTED_GRID_API_VERSION = "multi_regime_grid_v1"
 EXPECTED_MODEL_API_VERSION = "multi_regime_models_v1"
+DB_CONNECTION_CACHE_VERSION = "postgres_no_prepared_statements_v1"
 
 STATUTS = [
     "a_analyser",
@@ -331,7 +332,7 @@ def _readonly_field(label: str, value: str, field_name: str, help_text: str) -> 
 
 
 @st.cache_resource
-def _database(target: str):
+def _database(target: str, cache_version: str):
     return open_database(target)
 
 
@@ -2089,7 +2090,7 @@ def main() -> None:
         database_target = database_url
     else:
         database_target = st.sidebar.text_input("Base SQLite", value=str(DEFAULT_DB_PATH))
-    conn = _database(database_target)
+    conn = _database(database_target, DB_CONNECTION_CACHE_VERSION)
     rows, selected_id = _sidebar(conn)
     annonce, hypotheses = _load_bundle(conn, selected_id)
 

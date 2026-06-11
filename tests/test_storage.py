@@ -5,6 +5,7 @@ import psycopg
 from achat_immo.grids import GrilleParametres, simuler_grille_annonce
 from achat_immo.storage import (
     AnnonceRecord,
+    connect,
     DatabaseConnection,
     HypothesesAchatRecord,
     fiscalite_from_hypotheses,
@@ -81,6 +82,31 @@ def test_facade_postgresql_reconnecte_apres_erreur_operationnelle() -> None:
         ("dead", "SELECT * FROM annonces WHERE id = %s", (1,)),
         ("healthy", "SELECT * FROM annonces WHERE id = %s", (1,)),
     ]
+
+
+def test_connexion_postgresql_desactive_les_prepared_statements(monkeypatch) -> None:
+    calls = []
+
+    class FakeRaw:
+        def close(self):
+            calls.append(("closed",))
+
+    def fake_connect(dsn, **kwargs):
+        calls.append(("connect", dsn, kwargs))
+        return FakeRaw()
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    conn = connect("postgresql://example.test/db")
+    conn._reconnect()
+
+    connect_calls = [call for call in calls if call[0] == "connect"]
+    assert len(connect_calls) == 2
+    for _, dsn, kwargs in connect_calls:
+        assert dsn == "postgresql://example.test/db"
+        assert kwargs["autocommit"] is True
+        assert kwargs["prepare_threshold"] is None
+        assert kwargs["row_factory"] is not None
 
 
 def test_sqlite_annonce_hypotheses_et_conversion(tmp_path: Path) -> None:

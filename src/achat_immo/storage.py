@@ -115,7 +115,7 @@ class DatabaseConnection:
                 "La dependance psycopg est requise pour reconnecter PostgreSQL. "
                 "Installe les dependances avec `uv sync`."
             ) from exc
-        self.raw = psycopg.connect(self.dsn, row_factory=dict_row, autocommit=True)
+        self.raw = psycopg.connect(self.dsn, row_factory=dict_row, autocommit=True, prepare_threshold=None)
 
 
 def is_postgres_target(target: str | Path) -> bool:
@@ -221,7 +221,7 @@ def _connect_postgres(database_url: str) -> DatabaseConnection:
             "Installe les dependances avec `uv sync`."
         ) from exc
 
-    conn = psycopg.connect(database_url, row_factory=dict_row, autocommit=True)
+    conn = psycopg.connect(database_url, row_factory=dict_row, autocommit=True, prepare_threshold=None)
     return DatabaseConnection(conn, "postgres", dsn=database_url)
 
 
