@@ -13,10 +13,17 @@ import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
-SRC_PATH_STR = str(SRC_PATH)
-if SRC_PATH_STR in sys.path:
-    sys.path.remove(SRC_PATH_STR)
-sys.path.insert(0, SRC_PATH_STR)
+
+
+def _prepend_sys_path(path: Path) -> None:
+    path_str = str(path)
+    if path_str in sys.path:
+        sys.path.remove(path_str)
+    sys.path.insert(0, path_str)
+
+
+_prepend_sys_path(PROJECT_ROOT)
+_prepend_sys_path(SRC_PATH)
 
 
 def _force_fresh_repo_source_package(package_name: str) -> None:
