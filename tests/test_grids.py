@@ -186,3 +186,8 @@ def test_grille_supporte_parametres_et_scenario_legacy(monkeypatch) -> None:
     )
 
     assert len(resultats) == 2
+    assert compter_scenarios_grille(
+        bien,
+        location,
+        LegacyParametres(),  # type: ignore[arg-type]
+    ) == 2

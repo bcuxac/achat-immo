@@ -336,7 +336,7 @@ def compter_scenarios_grille(
 
     fiscalite = fiscalite or Fiscalite()
     loyers = parametres.loyers_hc_mensuels or (location.loyer_hc_mensuel,)
-    if parametres.appliquer_plafond_loyer:
+    if getattr(parametres, "appliquer_plafond_loyer", True):
         loyers = borner_loyers_hc(loyers, bien, location)
     gestions = parametres.gestions_agence if gestion_agence_possible else (False,)
     prix_achats = parametres.prix_achats or (bien.prix_achat,)
