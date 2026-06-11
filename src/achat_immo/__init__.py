@@ -25,6 +25,8 @@ from achat_immo.hypothesis_inference import (
     HypothesisSuggestion,
     appliquer_suggestions,
     inferer_hypotheses_depuis_annonce,
+)
+from achat_immo.fiscal_rules import (
     prelevements_sociaux_par_regime,
     regime_fiscal_recommande,
     regimes_compatibles,

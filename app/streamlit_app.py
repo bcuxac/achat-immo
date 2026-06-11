@@ -56,18 +56,18 @@ from achat_immo.city_profiles import (
     profile_for_city,
     supported_city_labels,
 )
-from achat_immo.diagnostics import DiagnosticStatus, diagnostiquer_annonce
+from achat_immo.diagnostics import diagnostiquer_annonce
+from achat_immo.fiscal_rules import (
+    regime_fiscal_recommande,
+    regimes_compatibles,
+)
 from achat_immo.hypothesis_inference import (
     appliquer_suggestions,
     inferer_hypotheses_depuis_annonce,
-    prelevements_sociaux_par_regime,
-    regime_fiscal_recommande,
-    regimes_compatibles,
 )
 from achat_immo.models import (
     BienImmobilier,
     EpoqueConstruction,
-    Fiscalite,
     HypothesesLocation,
     ModeLocation,
     RegimeFiscal,
@@ -82,34 +82,44 @@ from achat_immo.storage import (
     fiscalite_from_hypotheses,
     HypothesesAchatRecord,
     get_annonce_bundle,
-    get_simulation_results,
     list_annonces,
-    list_simulation_runs,
     open_database,
     save_annonce,
     save_simulation_run,
     to_domain_models,
-    update_decision,
+)
+from app.components import (
+    badge_caption as _badge_caption,
+    decision_factor as _decision_factor,
+    decision_robuste_status as _decision_robuste_status,
+    diagnostic_status_label as _diagnostic_status_label,
+    readonly_field as _readonly_field,
+)
+from app.pages.comparison import comparison_page
+from app.pages.dashboard import dashboard_page
+from app.pages.history import history_page
+from app.ui_helpers import (
+    PORTFOLIO_DECISION_LABEL,
+    SIMULATION_SECTION_LABELS,
+    derived_fiscalite_values,
+    display_hypothesis_value as _display_hypothesis_value,
+    effective_cfe_value,
+    effective_comptable_lmnp_value,
+    enum_label as _enum_label,
+    field_origin as field_origin,
+    format_eur as _format_eur,
+    format_eur_optional as _format_eur_optional,
+    gestion_label as _gestion_label,
+    is_advanced_field as is_advanced_field,
+    is_cfe_applicable,
+    is_comptable_lmnp_applicable,
+    is_deduced_field as is_deduced_field,
 )
 
 
 EXPECTED_GRID_API_VERSION = "multi_regime_grid_v1"
 EXPECTED_MODEL_API_VERSION = "multi_regime_models_v1"
 DB_CONNECTION_CACHE_VERSION = "postgres_no_prepared_statements_v1"
-
-STATUTS = [
-    "a_analyser",
-    "diagnostic_incomplet",
-    "a_visiter",
-    "a_negocier",
-    "favori",
-    "rejete",
-    "archive",
-]
-
-SIMULATION_SECTION_LABELS = ("Exploitation", "Strategies testees", "Analyse")
-PORTFOLIO_DECISION_LABEL = "Decision portefeuille"
-
 
 HYPOTHESES_HELP = {
     "frais_notaire_estimes": (
@@ -242,94 +252,6 @@ SIMULATION_HELP = {
     "commentaire": "Libelle du snapshot sauvegarde pour retrouver l'hypothese de travail.",
     "grille_avancee": "Active les min/max/pas historiques si tu veux une grille plus large que le mode compact.",
 }
-
-FIELD_ORIGIN = {
-    "frais_notaire_estimes": "Saisi",
-    "frais_agence_achat": "Saisi",
-    "travaux_estimes": "Saisi",
-    "meubles_estimes": "Saisi",
-    "frais_bancaires": "Saisi",
-    "garantie": "Saisi",
-    "mode_location": "Saisi",
-    "loyer_hc_mensuel": "Saisi",
-    "taxe_fonciere": "Saisi",
-    "charges_copro_annuelles": "Saisi",
-    "charges_recuperables_annuelles": "Saisi",
-    "assurance_pno": "Saisi",
-    "assurance_gli": "Saisi",
-    "cfe_annuelle": "Saisi",
-    "comptable_lmnp": "Saisi",
-    "entretien_annuel": "Saisi",
-    "gestion_agence_possible": "Saisi",
-    "regime_fiscal": "Saisi",
-    "tmi_pct": "Saisi",
-    "prelevements_sociaux_pct": "Deduit",
-    "abattement_micro_bic_pct": "Deduit",
-    "abattement_micro_foncier_pct": "Deduit",
-    "seuil_micro_bic": "Deduit",
-    "seuil_micro_foncier": "Deduit",
-    "taux_impot_plus_value_pct": "Deduit",
-    "taux_prelevements_sociaux_plus_value_pct": "Deduit",
-    "reintegrer_amortissements_lmnp_plus_value": "Deduit",
-    "cfe_neutralisee": "Deduit",
-    "comptable_lmnp_neutralise": "Deduit",
-    "part_terrain_pct": "Avance",
-    "duree_amortissement_bien_annees": "Avance",
-    "duree_amortissement_travaux_annees": "Avance",
-    "duree_amortissement_meubles_annees": "Avance",
-}
-
-
-def field_origin(field_name: str) -> str:
-    return FIELD_ORIGIN.get(field_name, "Saisi")
-
-
-def is_deduced_field(field_name: str) -> bool:
-    return field_origin(field_name) == "Deduit"
-
-
-def is_advanced_field(field_name: str) -> bool:
-    return field_origin(field_name) == "Avance"
-
-
-def is_cfe_applicable(mode_location: ModeLocation) -> bool:
-    return mode_location == ModeLocation.MEUBLEE
-
-
-def is_comptable_lmnp_applicable(regime_fiscal: RegimeFiscal) -> bool:
-    return regime_fiscal == RegimeFiscal.LMNP_REEL
-
-
-def effective_cfe_value(mode_location: ModeLocation, value: float) -> float:
-    return float(value) if is_cfe_applicable(mode_location) else 0.0
-
-
-def effective_comptable_lmnp_value(regime_fiscal: RegimeFiscal, value: float) -> float:
-    return float(value) if is_comptable_lmnp_applicable(regime_fiscal) else 0.0
-
-
-def derived_fiscalite_values(regime_fiscal: RegimeFiscal) -> dict[str, float | bool]:
-    defaults = Fiscalite()
-    return {
-        "prelevements_sociaux_pct": prelevements_sociaux_par_regime(regime_fiscal),
-        "abattement_micro_bic_pct": defaults.abattement_micro_bic_pct,
-        "abattement_micro_foncier_pct": defaults.abattement_micro_foncier_pct,
-        "taux_impot_plus_value_pct": defaults.taux_impot_plus_value_pct,
-        "taux_prelevements_sociaux_plus_value_pct": defaults.taux_prelevements_sociaux_plus_value_pct,
-        "reintegrer_amortissements_lmnp_plus_value": defaults.reintegrer_amortissements_lmnp_plus_value,
-    }
-
-
-def _badge_caption(field_name: str) -> None:
-    st.caption(f"Champ {field_origin(field_name)}")
-
-
-def _readonly_field(label: str, value: str, field_name: str, help_text: str) -> None:
-    with st.container(border=True):
-        st.markdown(f"**{label}**")
-        st.write(value)
-        st.caption(f"Champ {field_origin(field_name)} - {help_text}")
-
 
 @st.cache_resource
 def _database(target: str, cache_version: str):
@@ -533,20 +455,6 @@ def _require_current_runtime_api() -> None:
     st.stop()
 
 
-def _enum_label(value: Any) -> str:
-    return str(getattr(value, "value", value)).replace("_", " ")
-
-
-def _display_hypothesis_value(value: Any) -> str:
-    if hasattr(value, "value"):
-        return _enum_label(value)
-    if isinstance(value, bool):
-        return "oui" if value else "non"
-    if isinstance(value, float):
-        return f"{value:,.1f}" if value % 1 else f"{value:,.0f}"
-    return str(value)
-
-
 def _suggestions_dataframe(
     hypotheses: HypothesesAchatRecord,
     suggestions: dict[str, Any],
@@ -618,43 +526,6 @@ def _load_bundle(conn, annonce_id: int | None):
     if annonce_id is None:
         return None, None
     return get_annonce_bundle(conn, annonce_id)
-
-
-def _dashboard(conn, rows: list[dict[str, Any]]) -> None:
-    st.subheader("Vue base SQLite")
-    st.caption("Cette page sert a voir ce qui est stocke : annonces suivies, decisions et derniers runs.")
-    runs = list_simulation_runs(conn)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Annonces", len(rows))
-    c2.metric("Runs sauvegardes", len(runs))
-    c3.metric("Favorites", sum(1 for row in rows if row["statut"] == "favori"))
-    c4.metric("Rejetees", sum(1 for row in rows if row["statut"] == "rejete"))
-
-    if rows:
-        df = pd.DataFrame(rows)
-        st.dataframe(
-            df[
-                [
-                    "id",
-                    "statut",
-                    "ville",
-                    "quartier",
-                    "adresse",
-                    "type_bien",
-                    "nb_pieces",
-                    "epoque_construction",
-                    "secteur_encadrement",
-                    "surface_m2",
-                    "prix_affiche",
-                    "dpe",
-                ]
-            ],
-            hide_index=True,
-            width="stretch",
-        )
-    if runs:
-        st.subheader("Derniers runs")
-        st.dataframe(pd.DataFrame(runs).head(10), hide_index=True, width="stretch")
 
 
 def _annonce_page(conn, annonce: AnnonceRecord | None, hypotheses: HypothesesAchatRecord | None) -> None:
@@ -1363,18 +1234,6 @@ def _simulation_state_key(annonce_id: int | None, suffix: str) -> str:
     return f"simulation_{annonce_id or 'none'}_{suffix}"
 
 
-def _format_eur(value: float) -> str:
-    return f"{value:,.0f} EUR"
-
-
-def _format_eur_optional(value: float | None) -> str:
-    return "n/a" if value is None else f"{value:,.0f} EUR"
-
-
-def _gestion_label(value: object) -> str:
-    return "agence" if bool(value) else "directe"
-
-
 def _pret_range(bien: BienImmobilier, params: GrilleParametres) -> tuple[float, float] | None:
     prix_achats = params.prix_achats or (bien.prix_achat,)
     montants = []
@@ -1690,16 +1549,6 @@ def _scenario_details(resultats: list[GrilleResultat]) -> None:
                 st.dataframe(amort_df, hide_index=True, width="stretch")
 
 
-def _decision_robuste_status(decision: str) -> str:
-    return {
-        "interessant": "OK",
-        "a_creuser": "Attention",
-        "a_negocier": "Attention",
-        "diagnostic_incomplet": "A verifier",
-        "a_rejeter": "Bloquant",
-    }.get(decision, "Neutre")
-
-
 def _robustesse_summary(robustesse: RobustesseGrille) -> None:
     st.subheader("Decision robuste")
     c1, c2, c3, c4 = st.columns(4)
@@ -1854,36 +1703,6 @@ def _threshold_status(value: float, minimum: float) -> str:
     return "OK" if value >= minimum else "Bloquant"
 
 
-def _status_style(status: str) -> str:
-    return {
-        "OK": "background:#dcfce7;color:#166534;border:1px solid #86efac;",
-        "Attention": "background:#fef3c7;color:#92400e;border:1px solid #fcd34d;",
-        "Bloquant": "background:#fee2e2;color:#991b1b;border:1px solid #fecaca;",
-        "Neutre": "background:#e2e8f0;color:#475569;border:1px solid #cbd5e1;",
-        "A verifier": "background:#e0f2fe;color:#075985;border:1px solid #7dd3fc;",
-    }.get(status, "background:#e2e8f0;color:#475569;border:1px solid #cbd5e1;")
-
-
-def _decision_factor(title: str, value: str, status: str, detail: str) -> None:
-    with st.container(border=True):
-        st.markdown(f"**{title}**")
-        st.markdown(
-            f"<span style='display:inline-block;padding:2px 8px;border-radius:999px;{_status_style(status)}'>{status}</span>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(value)
-        st.caption(detail)
-
-
-def _diagnostic_status_label(status: DiagnosticStatus) -> str:
-    return {
-        DiagnosticStatus.OK: "OK",
-        DiagnosticStatus.WARNING: "Attention",
-        DiagnosticStatus.BLOCKING: "Bloquant",
-        DiagnosticStatus.MISSING: "A verifier",
-    }[status]
-
-
 def _decision_map(
     df: pd.DataFrame,
     annonce: AnnonceRecord,
@@ -1987,97 +1806,6 @@ def _decision_map(
         )
 
 
-def _comparison_page(conn, rows: list[dict[str, Any]], annonce: AnnonceRecord | None) -> None:
-    st.subheader(PORTFOLIO_DECISION_LABEL)
-    st.caption("Compare uniquement les annonces pour lesquelles un snapshot de simulation a ete sauvegarde.")
-    runs = list_simulation_runs(conn)
-    status_by_annonce = {
-        int(row["id"]): str(row.get("statut") or "")
-        for row in rows
-        if row.get("id") is not None
-    }
-    if runs:
-        latest_by_annonce: dict[int, dict[str, Any]] = {}
-        for run in runs:
-            latest_by_annonce.setdefault(int(run["annonce_id"]), run)
-        best_rows = []
-        for run in latest_by_annonce.values():
-            results = get_simulation_results(conn, int(run["id"]))
-            if results:
-                best = dict(results[0])
-                robustesse = analyser_grille(results)
-                annonce_id = int(run["annonce_id"])
-                best["ville"] = run["ville"]
-                best["quartier"] = run["quartier"]
-                best["run_id"] = run["id"]
-                best["statut"] = status_by_annonce.get(annonce_id, "")
-                best["decision_robuste"] = robustesse.decision
-                best["meilleure_strategie"] = " / ".join(
-                    value for value in (str(best.get("mode_location") or ""), str(best.get("regime_fiscal") or "")) if value
-                )
-                best["cashflow_prudent"] = robustesse.meilleur_cashflow_prudent
-                best["cashflow_median"] = robustesse.cashflow_median
-                best["pct_scenarios_viables"] = robustesse.pct_viables
-                best_rows.append(best)
-        if best_rows:
-            df = pd.DataFrame(best_rows)
-            decision_cols = [
-                "ville",
-                "quartier",
-                "statut",
-                "decision_robuste",
-                "meilleure_strategie",
-                "tri_annuel_pct",
-                "patrimoine_net_sortie",
-                "cashflow_prudent",
-                "cashflow_median",
-                "pct_scenarios_viables",
-                "score",
-                "run_id",
-            ]
-            visible_cols = [col for col in decision_cols if col in df.columns]
-            sort_cols = [col for col in ("score", "patrimoine_net_sortie", "cashflow_prudent") if col in df.columns]
-            st.dataframe(
-                df[visible_cols].sort_values(sort_cols, ascending=False) if sort_cols else df[visible_cols],
-                hide_index=True,
-                width="stretch",
-            )
-        else:
-            st.info("Sauvegarde un snapshot depuis Simulations pour comparer les annonces.")
-    else:
-        st.info("Sauvegarde un snapshot depuis Simulations pour comparer les annonces.")
-
-    if annonce is None:
-        return
-    st.divider()
-    st.subheader("Statut de l'annonce active")
-    st.caption(
-        "Ce statut sert au suivi de ton pipeline personnel : a analyser, a visiter, a negocier, favori, "
-        "rejete ou archive."
-    )
-    with st.form("decision_form"):
-        statut = st.selectbox(
-            "Statut",
-            options=STATUTS,
-            index=STATUTS.index(annonce.statut) if annonce.statut in STATUTS else 0,
-        )
-        notes = st.text_area("Notes de decision", value=annonce.notes, height=130)
-        if st.form_submit_button("Sauvegarder la decision"):
-            update_decision(conn, annonce.id or 0, statut=statut, notes=notes)
-            st.success("Decision sauvegardee.")
-            st.rerun()
-
-
-def _history_page(conn, annonce_id: int | None) -> None:
-    runs = list_simulation_runs(conn, annonce_id)
-    if not runs:
-        st.info("Pas encore d'historique.")
-        return
-    st.dataframe(pd.DataFrame(runs), hide_index=True, width="stretch")
-    run_id = st.selectbox("Inspecter un snapshot", [int(run["id"]) for run in runs])
-    st.dataframe(pd.DataFrame(get_simulation_results(conn, run_id)).head(100), hide_index=True, width="stretch")
-
-
 def main() -> None:
     st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
     _require_authentication()
@@ -2099,7 +1827,7 @@ def main() -> None:
     )
 
     with tab_dashboard:
-        _dashboard(conn, rows)
+        dashboard_page(conn, rows)
     with tab_annonce:
         _annonce_page(conn, annonce, hypotheses)
     with tab_hypotheses:
@@ -2107,9 +1835,9 @@ def main() -> None:
     with tab_simulation:
         _simulation_page(conn, annonce, hypotheses)
     with tab_comparison:
-        _comparison_page(conn, rows, annonce)
+        comparison_page(conn, rows, annonce)
     with tab_history:
-        _history_page(conn, selected_id)
+        history_page(conn, selected_id)
 
 
 if __name__ == "__main__":

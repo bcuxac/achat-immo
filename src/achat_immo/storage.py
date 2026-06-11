@@ -24,6 +24,11 @@ from achat_immo.models import (
     RegimeFiscal,
     TypeBien,
 )
+from achat_immo.schemas import (
+    AnnonceRecordSchema,
+    HypothesesAchatRecordSchema,
+    SimulationResultRowSchema,
+)
 
 
 DEFAULT_DB_PATH = Path("data/achat_immo.sqlite")
@@ -542,91 +547,14 @@ def open_database(db_path: str | Path | None = DEFAULT_DB_PATH) -> DatabaseConne
     return conn
 
 
-def _type_bien(value: str) -> TypeBien:
-    try:
-        return TypeBien(value)
-    except ValueError:
-        return TypeBien.AUTRE
-
-
-def _epoque_construction(value: str) -> EpoqueConstruction:
-    try:
-        return EpoqueConstruction(value)
-    except ValueError:
-        return EpoqueConstruction.INCONNUE
-
-
-def _mode_location(value: str) -> ModeLocation:
-    try:
-        return ModeLocation(value)
-    except ValueError:
-        return ModeLocation.MEUBLEE
-
-
-def _regime_fiscal(value: str) -> RegimeFiscal:
-    try:
-        return RegimeFiscal(value)
-    except ValueError:
-        return RegimeFiscal.LMNP_REEL
-
-
 def _annonce_from_row(row: Mapping[str, Any]) -> AnnonceRecord:
-    return AnnonceRecord(
-        id=int(row["id"]),
-        date_creation=str(row["date_creation"]),
-        url=str(row["url"]),
-        ville=str(row["ville"]),
-        quartier=str(row["quartier"]),
-        adresse=str(row["adresse"]),
-        type_bien=_type_bien(str(row["type_bien"])),
-        nb_pieces=int(row["nb_pieces"]) if row["nb_pieces"] is not None else None,
-        epoque_construction=_epoque_construction(str(row["epoque_construction"])),
-        secteur_encadrement=str(row["secteur_encadrement"]),
-        surface_m2=float(row["surface_m2"]),
-        prix_affiche=float(row["prix_affiche"]),
-        prix_negocie=float(row["prix_negocie"]) if row["prix_negocie"] is not None else None,
-        dpe=str(row["dpe"]),
-        description=str(row["description"]),
-        statut=str(row["statut"]),
-        notes=str(row["notes"]),
-    )
+    data = AnnonceRecordSchema.model_validate(dict(row)).model_dump()
+    return AnnonceRecord(**data)
 
 
 def _hypotheses_from_row(row: Mapping[str, Any]) -> HypothesesAchatRecord:
-    return HypothesesAchatRecord(
-        annonce_id=int(row["annonce_id"]),
-        frais_agence_achat=float(row["frais_agence_achat"]),
-        frais_notaire_estimes=float(row["frais_notaire_estimes"]),
-        travaux_estimes=float(row["travaux_estimes"]),
-        meubles_estimes=float(row["meubles_estimes"]),
-        frais_bancaires=float(row["frais_bancaires"]),
-        garantie=float(row["garantie"]),
-        loyer_hc_mensuel=float(row["loyer_hc_mensuel"]),
-        mode_location=_mode_location(str(row["mode_location"])),
-        charges_copro_annuelles=float(row["charges_copro_annuelles"]),
-        charges_recuperables_annuelles=float(row["charges_recuperables_annuelles"]),
-        taxe_fonciere=float(row["taxe_fonciere"]),
-        assurance_pno=float(row["assurance_pno"]),
-        assurance_gli=float(row["assurance_gli"]),
-        frais_gestion_pct=float(row["frais_gestion_pct"]),
-        cfe_annuelle=float(row["cfe_annuelle"]),
-        comptable_lmnp=float(row["comptable_lmnp"]),
-        entretien_annuel=float(row["entretien_annuel"]),
-        regime_fiscal=_regime_fiscal(str(row["regime_fiscal"])),
-        tmi_pct=float(row["tmi_pct"]),
-        prelevements_sociaux_pct=float(row["prelevements_sociaux_pct"]),
-        part_terrain_pct=float(row["part_terrain_pct"]),
-        duree_amortissement_bien_annees=int(row["duree_amortissement_bien_annees"]),
-        duree_amortissement_travaux_annees=int(row["duree_amortissement_travaux_annees"]),
-        duree_amortissement_meubles_annees=int(row["duree_amortissement_meubles_annees"]),
-        abattement_micro_bic_pct=float(row["abattement_micro_bic_pct"]),
-        abattement_micro_foncier_pct=float(row["abattement_micro_foncier_pct"]),
-        gestion_agence_possible=bool(row["gestion_agence_possible"]),
-        apport_reference=float(row["apport_reference"]),
-        taux_credit_reference=float(row["taux_credit_reference"]),
-        duree_credit_reference=int(row["duree_credit_reference"]),
-        assurance_emprunteur_pct=float(row["assurance_emprunteur_pct"]),
-    )
+    data = HypothesesAchatRecordSchema.model_validate(dict(row)).model_dump()
+    return HypothesesAchatRecord(**data)
 
 
 def save_annonce(
@@ -635,6 +563,9 @@ def save_annonce(
     hypotheses: HypothesesAchatRecord,
 ) -> int:
     """Cree ou met a jour une annonce et ses hypotheses."""
+
+    AnnonceRecordSchema.model_validate(annonce)
+    HypothesesAchatRecordSchema.model_validate(hypotheses)
 
     if annonce.id is None:
         insert_sql = """
@@ -906,7 +837,10 @@ def save_simulation_run(
     resultats: Iterable[Mapping[str, Any]],
     commentaire: str = "",
 ) -> int:
-    rows = [dict(resultat) for resultat in resultats]
+    rows = [
+        SimulationResultRowSchema.model_validate(dict(resultat)).model_dump()
+        for resultat in resultats
+    ]
     insert_sql = """
         INSERT INTO simulation_runs (annonce_id, date_run, commentaire, nb_resultats)
         VALUES (?, ?, ?, ?)

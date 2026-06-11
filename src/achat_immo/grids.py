@@ -12,6 +12,7 @@ import pandas as pd
 from achat_immo.comparison import scorer_bien
 from achat_immo.city_profiles import borner_loyers_hc
 from achat_immo.diagnostics import diagnostiquer_annonce
+from achat_immo.fiscal_rules import prelevements_sociaux_par_regime, regimes_compatibles
 from achat_immo.models import (
     BienImmobilier,
     Financement,
@@ -152,15 +153,7 @@ class GrilleResultat:
 def regimes_compatibles_mode(mode_location: ModeLocation) -> tuple[RegimeFiscal, ...]:
     """Regimes modelises compatibles avec un mode de location."""
 
-    if mode_location == ModeLocation.NUE:
-        return (RegimeFiscal.LOCATION_NUE_REEL, RegimeFiscal.MICRO_FONCIER)
-    return (RegimeFiscal.LMNP_REEL, RegimeFiscal.MICRO_BIC)
-
-
-def _prelevements_sociaux_regime(regime: RegimeFiscal) -> float:
-    if regime in {RegimeFiscal.LMNP_REEL, RegimeFiscal.MICRO_BIC}:
-        return 18.6
-    return 17.2
+    return regimes_compatibles(mode_location)
 
 
 def _modes_a_tester(location: HypothesesLocation, parametres: GrilleParametres) -> tuple[ModeLocation, ...]:
@@ -259,7 +252,7 @@ def simuler_grille_annonce(
                 fiscalite_scenario = replace(
                     fiscalite,
                     regime=regime,
-                    prelevements_sociaux_pct=_prelevements_sociaux_regime(regime),
+                    prelevements_sociaux_pct=prelevements_sociaux_par_regime(regime),
                 )
                 scenario = Scenario(
                     nom=(

@@ -12,6 +12,11 @@ import re
 import unicodedata
 
 from achat_immo.city_profiles import loyer_max_hc_mensuel, profile_for_city
+from achat_immo.fiscal_rules import (
+    prelevements_sociaux_par_regime,
+    regime_fiscal_recommande,
+    regimes_compatibles as _regimes_compatibles,
+)
 from achat_immo.models import (
     BienImmobilier,
     ModeLocation,
@@ -45,6 +50,12 @@ class HypothesisSuggestion:
     confidence: str
     source: str
     reason: str
+
+
+def regimes_compatibles(mode_location: ModeLocation) -> tuple[RegimeFiscal, ...]:
+    """Compatibilite historique : utiliser `achat_immo.fiscal_rules` directement."""
+
+    return _regimes_compatibles(mode_location)
 
 
 def _normalize_text(value: str) -> str:
@@ -87,32 +98,6 @@ def _monthly_context(text: str, keywords: tuple[str, ...], *, window: int = 140)
         if "mois" in segment or "mensuel" in segment:
             return True
     return False
-
-
-def regimes_compatibles(mode_location: ModeLocation) -> tuple[RegimeFiscal, ...]:
-    """Regimes modelises compatibles avec le mode de location."""
-
-    if mode_location == ModeLocation.NUE:
-        return (RegimeFiscal.LOCATION_NUE_REEL, RegimeFiscal.MICRO_FONCIER)
-    return (RegimeFiscal.LMNP_REEL, RegimeFiscal.MICRO_BIC)
-
-
-def regime_fiscal_recommande(mode_location: ModeLocation, revenus_hc_annuels: float) -> RegimeFiscal:
-    """Choisit un regime prudent pour un investissement locatif classique."""
-
-    if mode_location == ModeLocation.NUE:
-        if revenus_hc_annuels <= 15_000:
-            return RegimeFiscal.LOCATION_NUE_REEL
-        return RegimeFiscal.LOCATION_NUE_REEL
-    return RegimeFiscal.LMNP_REEL
-
-
-def prelevements_sociaux_par_regime(regime: RegimeFiscal) -> float:
-    """Taux sociaux 2026 pour les regimes locatifs modelises."""
-
-    if regime in {RegimeFiscal.LMNP_REEL, RegimeFiscal.MICRO_BIC}:
-        return 18.6
-    return 17.2
 
 
 def _mode_location_suggere(annonce: AnnonceRecord, hypotheses: HypothesesAchatRecord) -> ModeLocation:
