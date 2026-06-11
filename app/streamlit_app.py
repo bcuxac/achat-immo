@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
-import hashlib
+from dataclasses import replace
 import importlib
-from inspect import getsourcefile, signature
-import os
 from pathlib import Path
 import sys
 from typing import Any
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +34,6 @@ _force_fresh_repo_source_package("achat_immo")
 from achat_immo import grids as grids_module
 from achat_immo import models as models_module
 from achat_immo.grids import (
-    GrilleResultat,
     GrilleParametres,
     compter_scenarios_grille,
     generer_plage_float,
@@ -46,16 +41,7 @@ from achat_immo.grids import (
     grille_to_dataframe,
     simuler_grille_annonce,
 )
-from achat_immo.loan import tableau_amortissement
-from achat_immo.comparison import SeuilsDecision
-from achat_immo.city_profiles import (
-    SECTEUR_A_VERIFIER,
-    canonical_city_label,
-    loyer_max_hc_mensuel,
-    profile_for_city,
-    supported_city_labels,
-)
-from achat_immo.diagnostics import diagnostiquer_annonce
+from achat_immo.city_profiles import loyer_max_hc_mensuel, profile_for_city
 from achat_immo.fiscal_rules import (
     regime_fiscal_recommande,
     regimes_compatibles,
@@ -66,22 +52,17 @@ from achat_immo.hypothesis_inference import (
 )
 from achat_immo.models import (
     BienImmobilier,
-    EpoqueConstruction,
     HypothesesLocation,
     ModeLocation,
     RegimeFiscal,
-    ResultatSimulation,
     Scenario,
-    TypeBien,
 )
-from achat_immo.robustness import RobustesseGrille, analyser_grille
+from achat_immo.robustness import analyser_grille
 from achat_immo.storage import (
     AnnonceRecord,
     DEFAULT_DB_PATH,
     fiscalite_from_hypotheses,
     HypothesesAchatRecord,
-    get_annonce_bundle,
-    list_annonces,
     open_database,
     save_annonce,
     save_simulation_run,
@@ -89,18 +70,29 @@ from achat_immo.storage import (
 )
 from app.components import (
     badge_caption as _badge_caption,
-    decision_factor as _decision_factor,
-    decision_robuste_status as _decision_robuste_status,
-    diagnostic_status_label as _diagnostic_status_label,
     readonly_field as _readonly_field,
 )
 from app.help_texts import FIELD_HELP, SIMULATION_HELP
+from app.pages.annonce import annonce_page
 from app.pages.comparison import comparison_page
 from app.pages.dashboard import dashboard_page
 from app.pages.history import history_page
 from app.runtime_config import (
     configured_database_url as _configured_database_url,
     require_authentication as _require_authentication,
+)
+from app.runtime_checks import (
+    RuntimeApiContext,
+    require_current_runtime_api as _require_current_runtime_api,
+    runtime_api_errors as _runtime_api_errors_for_context,
+)
+from app.sidebar import load_bundle as _load_bundle, sidebar as _sidebar
+from app.simulation_views import (
+    decision_map as _decision_map,
+    robustesse_summary as _robustesse_summary,
+    scenario_details as _scenario_details,
+    strategie_summary as _strategie_summary,
+    visualisations as _visualisations,
 )
 from app.ui_helpers import (
     PORTFOLIO_DECISION_LABEL,
@@ -113,7 +105,6 @@ from app.ui_helpers import (
     field_origin as field_origin,
     format_eur as _format_eur,
     format_eur_optional as _format_eur_optional,
-    gestion_label as _gestion_label,
     is_advanced_field as is_advanced_field,
     is_cfe_applicable,
     is_comptable_lmnp_applicable,
@@ -124,6 +115,18 @@ from app.ui_helpers import (
 EXPECTED_GRID_API_VERSION = "multi_regime_grid_v1"
 EXPECTED_MODEL_API_VERSION = "multi_regime_models_v1"
 DB_CONNECTION_CACHE_VERSION = "postgres_no_prepared_statements_v1"
+RUNTIME_API_CONTEXT = RuntimeApiContext(
+    expected_grid_api_version=EXPECTED_GRID_API_VERSION,
+    expected_model_api_version=EXPECTED_MODEL_API_VERSION,
+    src_path=SRC_PATH,
+    app_file=__file__,
+    grids_module=grids_module,
+    models_module=models_module,
+    grille_parametres=GrilleParametres,
+    scenario=Scenario,
+    compter_scenarios_grille=compter_scenarios_grille,
+    simuler_grille_annonce=simuler_grille_annonce,
+)
 
 @st.cache_resource
 def _database(target: str, cache_version: str):
@@ -138,111 +141,8 @@ def _as_int_tuple(values: list[int]) -> tuple[int, ...]:
     return tuple(int(value) for value in values)
 
 
-def _short_file_sha(path: str | None) -> str:
-    if not path:
-        return "inconnu"
-    try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
-    except OSError:
-        return "illisible"
-
-
-def _runtime_object_detail(label: str, obj: Any) -> str:
-    try:
-        obj_signature = str(signature(obj))
-    except (TypeError, ValueError):
-        obj_signature = "n/a"
-    return (
-        f"{label}: type={type(obj).__name__}, module={getattr(obj, '__module__', 'inconnu')}, "
-        f"id={id(obj)}, source={getsourcefile(obj) or 'inconnu'}, signature={obj_signature}, repr={obj!r}"
-    )
-
-
-def _runtime_module_detail(label: str, module: Any) -> str:
-    if module is None:
-        return f"{label}: absent de sys.modules"
-    checked_attrs = (
-        "GRID_API_VERSION",
-        "MODEL_API_VERSION",
-        "GrilleParametres",
-        "Scenario",
-        "compter_scenarios_grille",
-        "simuler_grille_annonce",
-    )
-    present_attrs = [attr for attr in checked_attrs if hasattr(module, attr)]
-    return (
-        f"{label}: type={type(module).__name__}, id={id(module)}, "
-        f"file={getattr(module, '__file__', 'inconnu')}, attrs_presents={present_attrs}"
-    )
-
-
 def _runtime_api_errors() -> list[str]:
-    errors: list[str] = []
-    loaded_grids_module = sys.modules.get("achat_immo.grids")
-    loaded_models_module = sys.modules.get("achat_immo.models")
-    grille_params = signature(GrilleParametres).parameters
-    scenario_params = signature(Scenario).parameters
-    count_params = signature(compter_scenarios_grille).parameters
-    simulate_params = signature(simuler_grille_annonce).parameters
-    grid_api_version = getattr(grids_module, "GRID_API_VERSION", None)
-    model_api_version = getattr(models_module, "MODEL_API_VERSION", None)
-
-    if grid_api_version != EXPECTED_GRID_API_VERSION:
-        errors.append(f"GRID_API_VERSION={grid_api_version!r}, attendu {EXPECTED_GRID_API_VERSION!r}.")
-    if model_api_version != EXPECTED_MODEL_API_VERSION:
-        errors.append(f"MODEL_API_VERSION={model_api_version!r}, attendu {EXPECTED_MODEL_API_VERSION!r}.")
-    for field_name in ("modes_location", "regimes_fiscaux", "comparer_regimes", "appliquer_plafond_loyer"):
-        if field_name not in grille_params:
-            errors.append(f"GrilleParametres ne contient pas {field_name}.")
-    if "taux_actualisation_pct" not in scenario_params:
-        errors.append("Scenario ne contient pas taux_actualisation_pct.")
-    for parameter_name in ("fiscalite", "gestion_agence_possible"):
-        if parameter_name not in count_params:
-            errors.append(f"compter_scenarios_grille ne supporte pas {parameter_name}.")
-    for parameter_name in ("fiscalite", "scenario_base", "gestion_agence_possible"):
-        if parameter_name not in simulate_params:
-            errors.append(f"simuler_grille_annonce ne supporte pas {parameter_name}.")
-    if grids_module is not loaded_grids_module:
-        errors.append("grids_module ne correspond pas a sys.modules['achat_immo.grids'].")
-    if models_module is not loaded_models_module:
-        errors.append("models_module ne correspond pas a sys.modules['achat_immo.models'].")
-    if GrilleParametres is not getattr(grids_module, "GrilleParametres", None):
-        errors.append("GrilleParametres ne vient pas de grids_module.GrilleParametres.")
-    if Scenario is not getattr(models_module, "Scenario", None):
-        errors.append("Scenario ne vient pas de models_module.Scenario.")
-    if compter_scenarios_grille is not getattr(grids_module, "compter_scenarios_grille", None):
-        errors.append("compter_scenarios_grille ne vient pas de grids_module.compter_scenarios_grille.")
-    if errors:
-        app_file = __file__
-        grids_file = getattr(loaded_grids_module, "__file__", None)
-        models_file = getattr(loaded_models_module, "__file__", None)
-        errors.append(f"commit env : {os.environ.get('STREAMLIT_GIT_COMMIT') or os.environ.get('GITHUB_SHA') or 'inconnu'}")
-        errors.append(f"app chargee depuis : {app_file}")
-        errors.append(f"app sha256 court : {_short_file_sha(app_file)}")
-        errors.append(f"achat_immo.grids charge depuis : {grids_file or 'inconnu'}")
-        errors.append(f"achat_immo.grids sha256 court : {_short_file_sha(grids_file)}")
-        errors.append(f"achat_immo.models charge depuis : {models_file or 'inconnu'}")
-        errors.append(f"achat_immo.models sha256 court : {_short_file_sha(models_file)}")
-        errors.append(f"src attendu : {SRC_PATH}")
-        errors.append(_runtime_module_detail("grids_module importe", grids_module))
-        errors.append(_runtime_module_detail("achat_immo.grids charge", loaded_grids_module))
-        errors.append(_runtime_module_detail("models_module importe", models_module))
-        errors.append(_runtime_module_detail("achat_immo.models charge", loaded_models_module))
-        errors.append(_runtime_object_detail("GrilleParametres importe", GrilleParametres))
-        errors.append(_runtime_object_detail("Scenario importe", Scenario))
-        errors.append(_runtime_object_detail("compter_scenarios_grille importe", compter_scenarios_grille))
-        errors.append(_runtime_object_detail("simuler_grille_annonce importe", simuler_grille_annonce))
-    return errors
-
-
-def _require_current_runtime_api() -> None:
-    errors = _runtime_api_errors()
-    if not errors:
-        return
-    st.error("Le code Python charge par l'application n'est pas synchronise avec l'interface Streamlit.")
-    st.caption("Redeploie l'application avec le dernier commit et vide le cache de dependances si necessaire.")
-    st.code("\n".join(errors))
-    st.stop()
+    return _runtime_api_errors_for_context(RUNTIME_API_CONTEXT)
 
 
 def _suggestions_dataframe(
@@ -265,155 +165,6 @@ def _suggestions_dataframe(
             }
         )
     return pd.DataFrame(rows)
-
-
-def _annonce_label(row: dict[str, Any]) -> str:
-    quartier = f" - {row['quartier']}" if row.get("quartier") else ""
-    return f"#{row['id']} {row['ville']}{quartier} - {row['surface_m2']:.0f} m2 - {row['prix_affiche']:,.0f} EUR"
-
-
-def _create_blank_annonce(conn) -> int:
-    return save_annonce(
-        conn,
-        AnnonceRecord(
-            ville="Grenoble",
-            surface_m2=30.0,
-            prix_affiche=80_000.0,
-            nb_pieces=2,
-            secteur_encadrement=SECTEUR_A_VERIFIER,
-            statut="a_analyser",
-        ),
-        HypothesesAchatRecord(loyer_hc_mensuel=500.0),
-    )
-
-
-def _sidebar(conn) -> tuple[list[dict[str, Any]], int | None]:
-    st.sidebar.subheader("Annonces")
-    if st.sidebar.button("Nouvelle annonce", type="primary", width="stretch"):
-        annonce_id = _create_blank_annonce(conn)
-        st.session_state["selected_annonce_id"] = annonce_id
-        st.rerun()
-
-    rows = list_annonces(conn)
-    if not rows:
-        st.sidebar.info("Cree une annonce pour commencer.")
-        return rows, None
-
-    ids = [int(row["id"]) for row in rows]
-    default_id = st.session_state.get("selected_annonce_id", ids[0])
-    index = ids.index(default_id) if default_id in ids else 0
-    selected = st.sidebar.selectbox(
-        "Annonce active",
-        options=ids,
-        index=index,
-        format_func=lambda annonce_id: _annonce_label(next(row for row in rows if row["id"] == annonce_id)),
-    )
-    st.session_state["selected_annonce_id"] = selected
-    return rows, selected
-
-
-def _load_bundle(conn, annonce_id: int | None):
-    if annonce_id is None:
-        return None, None
-    return get_annonce_bundle(conn, annonce_id)
-
-
-def _annonce_page(conn, annonce: AnnonceRecord | None, hypotheses: HypothesesAchatRecord | None) -> None:
-    if annonce is None or hypotheses is None:
-        st.info("Cree ou selectionne une annonce dans la barre laterale.")
-        return
-
-    st.subheader("Donnees factuelles de l'annonce")
-    st.caption("Ici on garde les informations propres au bien. La decision et les parametres iterables restent ailleurs.")
-
-    with st.form("annonce_form"):
-        c1, c2 = st.columns(2)
-        with c1:
-            villes = supported_city_labels()
-            ville_actuelle = canonical_city_label(annonce.ville)
-            ville = st.selectbox(
-                "Ville",
-                options=villes,
-                index=villes.index(ville_actuelle) if ville_actuelle in villes else 0,
-            )
-            quartier = st.text_input("Quartier", value=annonce.quartier)
-            adresse = st.text_input("Adresse approximative", value=annonce.adresse)
-            type_bien = st.selectbox(
-                "Type",
-                options=list(TypeBien),
-                index=list(TypeBien).index(annonce.type_bien),
-                format_func=lambda item: item.value,
-            )
-            nb_pieces = st.number_input(
-                "Nombre de pieces",
-                min_value=1,
-                max_value=10,
-                value=int(annonce.nb_pieces or 2),
-                step=1,
-            )
-        with c2:
-            surface_m2 = st.number_input("Surface m2", min_value=1.0, value=float(annonce.surface_m2), step=1.0)
-            prix_affiche = st.number_input(
-                "Prix affiche",
-                min_value=1_000.0,
-                value=float(annonce.prix_affiche),
-                step=1_000.0,
-            )
-            epoque_construction = st.selectbox(
-                "Epoque construction",
-                options=list(EpoqueConstruction),
-                index=list(EpoqueConstruction).index(annonce.epoque_construction),
-                format_func=_enum_label,
-            )
-            profile = profile_for_city(ville)
-            secteurs = profile.secteurs_encadrement if profile else {}
-            if secteurs:
-                secteur_options = tuple(secteurs)
-                secteur_value = (
-                    annonce.secteur_encadrement
-                    if annonce.secteur_encadrement in secteurs
-                    else SECTEUR_A_VERIFIER
-                )
-                secteur_encadrement = st.selectbox(
-                    "Secteur encadrement",
-                    options=secteur_options,
-                    index=secteur_options.index(secteur_value),
-                    format_func=lambda value: secteurs[value],
-                )
-            else:
-                secteur_encadrement = ""
-            dpe = st.text_input("DPE", value=annonce.dpe)
-            url = st.text_input("URL", value=annonce.url)
-
-        description = st.text_area("Description brute de l'annonce", value=annonce.description, height=150)
-
-        submitted = st.form_submit_button("Sauvegarder l'annonce")
-        if submitted:
-            save_annonce(
-                conn,
-                AnnonceRecord(
-                    id=annonce.id,
-                    date_creation=annonce.date_creation,
-                    url=url,
-                    ville=ville,
-                    quartier=quartier.strip(),
-                    adresse=adresse.strip(),
-                    type_bien=type_bien,
-                    nb_pieces=int(nb_pieces),
-                    epoque_construction=epoque_construction,
-                    secteur_encadrement=secteur_encadrement,
-                    surface_m2=surface_m2,
-                    prix_affiche=prix_affiche,
-                    prix_negocie=None,
-                    dpe=dpe.strip().upper(),
-                    description=description,
-                    statut=annonce.statut,
-                    notes=annonce.notes,
-                ),
-                hypotheses,
-            )
-            st.success("Annonce sauvegardee.")
-            st.rerun()
 
 
 def _hypotheses_inference_panel(
@@ -1177,430 +928,11 @@ def _simulation_page(conn, annonce: AnnonceRecord | None, hypotheses: Hypotheses
         st.success(f"Snapshot #{run_id} sauvegarde.")
 
 
-def _strategie_summary(df: pd.DataFrame) -> None:
-    st.subheader("Meilleures strategies")
-    rows = []
-    if "tri_annuel_pct" in df.columns:
-        tri_df = df.dropna(subset=["tri_annuel_pct"])
-        if not tri_df.empty:
-            row = tri_df.sort_values("tri_annuel_pct", ascending=False).iloc[0]
-            rows.append(("Meilleur TRI", row))
-    if "patrimoine_net_sortie" in df.columns:
-        row = df.sort_values("patrimoine_net_sortie", ascending=False).iloc[0]
-        rows.append(("Meilleur patrimoine net", row))
-    prudent_df = df[df["vacance_mois"] >= 1.0] if "vacance_mois" in df.columns else pd.DataFrame()
-    if not prudent_df.empty:
-        row = prudent_df.sort_values("cashflow_mensuel_apres_impot", ascending=False).iloc[0]
-        rows.append(("Cash-flow prudent", row))
-    rows.append(("Meilleur compromis", df.sort_values("score", ascending=False).iloc[0]))
-
-    synthese = []
-    for objectif, row in rows:
-        synthese.append(
-            {
-                "objectif": objectif,
-                "mode_location": row.get("mode_location", ""),
-                "regime_fiscal": row.get("regime_fiscal", ""),
-                "score": row.get("score"),
-                "tri_annuel_pct": row.get("tri_annuel_pct"),
-                "cashflow_mensuel_apres_impot": row.get("cashflow_mensuel_apres_impot"),
-                "patrimoine_net_sortie": row.get("patrimoine_net_sortie"),
-                "van": row.get("van"),
-                "break_even_year": row.get("break_even_year"),
-                "nb_annees_cashflow_negatif": row.get("nb_annees_cashflow_negatif"),
-                "impot_plus_value": row.get("impot_plus_value"),
-            }
-        )
-    st.dataframe(pd.DataFrame(synthese), hide_index=True, width="stretch")
-
-    group_cols = [col for col in ("mode_location", "regime_fiscal") if col in df.columns]
-    if group_cols and {"tri_annuel_pct", "patrimoine_net_sortie", "cashflow_mensuel_apres_impot"}.issubset(df.columns):
-        strategy_rows = []
-        for key, group in df.groupby(group_cols, dropna=False):
-            if not isinstance(key, tuple):
-                key = (key,)
-            prudent_group = group[group["vacance_mois"] >= 1.0] if "vacance_mois" in group.columns else group
-            cashflow_prudent = (
-                float(prudent_group["cashflow_mensuel_apres_impot"].max())
-                if not prudent_group.empty
-                else float(group["cashflow_mensuel_apres_impot"].max())
-            )
-            strategy_rows.append(
-                {
-                    **dict(zip(group_cols, key, strict=True)),
-                    "tri_annuel_pct": group["tri_annuel_pct"].max(),
-                    "patrimoine_net_sortie": group["patrimoine_net_sortie"].max(),
-                    "cashflow_prudent": cashflow_prudent,
-                    "score": group["score"].max() if "score" in group.columns else None,
-                }
-            )
-        strategy_df = pd.DataFrame(strategy_rows).dropna(subset=["tri_annuel_pct", "patrimoine_net_sortie"])
-        if not strategy_df.empty:
-            strategy_df["strategie"] = strategy_df[group_cols].astype(str).agg(" / ".join, axis=1)
-            fig = px.scatter(
-                strategy_df,
-                x="tri_annuel_pct",
-                y="patrimoine_net_sortie",
-                color="cashflow_prudent",
-                hover_name="strategie",
-                hover_data=["score"],
-                labels={
-                    "tri_annuel_pct": "TRI fonds propres (%)",
-                    "patrimoine_net_sortie": "Patrimoine net sortie",
-                    "cashflow_prudent": "Cash-flow prudent",
-                },
-            )
-            st.plotly_chart(fig, width="stretch")
-
-
-def _scenario_option_label(item: GrilleResultat) -> str:
-    resultat = item.resultat
-    regime = resultat.regime_fiscal.value if resultat.regime_fiscal else item.regime_fiscal.value
-    mode = resultat.mode_location.value if resultat.mode_location else item.mode_location.value
-    tri = "n/a" if resultat.tri_annuel_pct is None else f"{resultat.tri_annuel_pct:.2f} %"
-    return (
-        f"{mode} / {regime} | score {item.score} | "
-        f"CF {resultat.cashflow_mensuel_apres_impot:,.0f} EUR/mois | TRI {tri}"
-    )
-
-
-def _tableau_mensuel_credit(item: GrilleResultat) -> pd.DataFrame:
-    echeances = tableau_amortissement(
-        montant=item.resultat.montant_emprunte,
-        taux_annuel_pct=item.taux_credit,
-        duree_annees=item.duree_annees,
-        assurance_annuelle_pct=item.assurance_emprunteur_annuelle_pct,
-    )
-    return pd.DataFrame([asdict(echeance) for echeance in echeances])
-
-
-def _scenario_details(resultats: list[GrilleResultat]) -> None:
-    with st.expander("Inspection detaillee du scenario selectionne", expanded=False):
-        limit = min(len(resultats), 200)
-        item = st.selectbox(
-            "Scenario inspecte",
-            resultats[:limit],
-            format_func=_scenario_option_label,
-        )
-        resultat: ResultatSimulation = item.resultat
-
-        with st.expander("Amortissement du credit", expanded=True):
-            credit_df = pd.DataFrame(resultat.credit_annuel)
-            if not credit_df.empty:
-                fig = px.bar(
-                    credit_df,
-                    x="annee",
-                    y=["capital", "interets"],
-                    labels={"value": "EUR", "annee": "Annee", "variable": "Flux"},
-                )
-                st.plotly_chart(fig, width="stretch")
-                crd_fig = px.line(credit_df, x="annee", y="crd_fin", markers=True, labels={"crd_fin": "CRD fin"})
-                st.plotly_chart(crd_fig, width="stretch")
-                st.dataframe(credit_df, hide_index=True, width="stretch")
-
-            credit_mensuel_df = _tableau_mensuel_credit(item)
-            st.download_button(
-                "Telecharger le tableau mensuel du credit",
-                credit_mensuel_df.to_csv(index=False).encode("utf-8"),
-                file_name=f"credit_{resultat.scenario.nom}.csv",
-                mime="text/csv",
-            )
-
-        with st.expander("Fiscalite annuelle", expanded=False):
-            fiscal_df = pd.DataFrame(resultat.fiscalite_annuelle)
-            if fiscal_df.empty:
-                st.info("Aucune fiscalite annuelle disponible pour ce scenario.")
-            else:
-                st.dataframe(fiscal_df, hide_index=True, width="stretch")
-
-        with st.expander("Amortissements fiscaux", expanded=False):
-            amort_df = pd.DataFrame(resultat.amortissements_fiscaux)
-            if resultat.regime_fiscal != RegimeFiscal.LMNP_REEL:
-                st.info("Amortissements fiscaux non applicable pour ce regime.")
-            elif amort_df.empty:
-                st.info("Aucun tableau d'amortissement fiscal disponible.")
-            else:
-                fig_amort = px.bar(
-                    amort_df,
-                    x="annee",
-                    y=["bati", "travaux", "meubles", "frais_acquisition"],
-                    labels={"value": "Dotation", "annee": "Annee", "variable": "Composant"},
-                )
-                st.plotly_chart(fig_amort, width="stretch")
-                line_df = amort_df[["annee", "amortissement_reporte", "resultat_imposable"]]
-                line_fig = px.line(
-                    line_df,
-                    x="annee",
-                    y=["amortissement_reporte", "resultat_imposable"],
-                    markers=True,
-                    labels={"value": "EUR", "variable": "Indicateur"},
-                )
-                st.plotly_chart(line_fig, width="stretch")
-                st.dataframe(amort_df, hide_index=True, width="stretch")
-
-
-def _robustesse_summary(robustesse: RobustesseGrille) -> None:
-    st.subheader("Decision robuste")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        _decision_factor(
-            "Decision",
-            robustesse.decision.replace("_", " "),
-            _decision_robuste_status(robustesse.decision),
-            "Decision basee sur l'ensemble de la grille, pas seulement le meilleur scenario.",
-        )
-    c2.metric("Scenarios viables", f"{robustesse.nb_viables:,} / {robustesse.nb_scenarios:,}", f"{robustesse.pct_viables:.1f} %")
-    c3.metric("Cash-flow median", _format_eur_optional(robustesse.cashflow_median))
-    c4.metric("Cash-flow P10 grille", _format_eur_optional(robustesse.cashflow_p10))
-
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Scenarios positifs", f"{robustesse.nb_positifs:,}", f"{robustesse.pct_positifs:.1f} %")
-    c6.metric("Prix max viable", _format_eur_optional(robustesse.prix_max_viable))
-    c7.metric("Meilleur prudent", _format_eur_optional(robustesse.meilleur_cashflow_prudent))
-    c8.metric("Meilleur agence", _format_eur_optional(robustesse.meilleur_cashflow_agence))
-
-    st.markdown("**Raisons**")
-    for raison in robustesse.raisons:
-        st.caption(raison)
-
-    st.markdown("**Conditions de validite observees**")
-    st.dataframe(
-        pd.DataFrame({"condition": list(robustesse.conditions_validite)}),
-        hide_index=True,
-        width="stretch",
-    )
-
-
-def _visualisations(df: pd.DataFrame) -> None:
-    st.subheader("Sensibilite principale du cash-flow")
-    f1, f2, f3, f4, f5, f6, f7 = st.columns(7)
-    with f1:
-        prix_achat = st.selectbox("Prix achat", sorted(df["prix_achat"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
-    with f2:
-        loyer = st.selectbox("Loyer HC", sorted(df["loyer_hc_mensuel"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
-    with f3:
-        apport = st.selectbox("Apport", sorted(df["apport"].unique()), format_func=lambda v: f"{v:,.0f} EUR")
-    with f4:
-        gestion = st.selectbox(
-            "Gestion",
-            sorted(df["gestion_agence"].unique()),
-            format_func=lambda v: "agence" if v else "directe",
-        )
-    with f5:
-        frais_gestion_options = sorted(df[df["gestion_agence"] == gestion]["frais_gestion_pct"].unique())
-        frais_gestion = st.selectbox("Frais gestion", frais_gestion_options, format_func=lambda v: f"{v:g} %")
-    with f6:
-        mode_location = st.selectbox("Mode", sorted(df["mode_location"].unique()) if "mode_location" in df.columns else [""])
-    with f7:
-        regime_fiscal = st.selectbox("Regime", sorted(df["regime_fiscal"].unique()) if "regime_fiscal" in df.columns else [""])
-
-    filtered = df[
-        (df["prix_achat"] == prix_achat)
-        & (df["loyer_hc_mensuel"] == loyer)
-        & (df["apport"] == apport)
-        & (df["gestion_agence"] == gestion)
-        & (df["frais_gestion_pct"] == frais_gestion)
-    ]
-    if "mode_location" in filtered.columns:
-        filtered = filtered[filtered["mode_location"] == mode_location]
-    if "regime_fiscal" in filtered.columns:
-        filtered = filtered[filtered["regime_fiscal"] == regime_fiscal]
-    if filtered.empty:
-        st.info("Aucune combinaison pour ces filtres.")
-        return
-
-    vacances = sorted(filtered["vacance_mois"].unique())
-    tabs = st.tabs([f"Vacance {vacance:g} mois/an" for vacance in vacances])
-    for tab, vacance in zip(tabs, vacances, strict=True):
-        vacancy_df = filtered[filtered["vacance_mois"] == vacance]
-        with tab:
-            _plot_heatmap(vacancy_df, "cashflow_mensuel_apres_impot", "Cash-flow")
-
-    with st.expander("Graphes avances", expanded=False):
-        direct_mask = ~df["gestion_agence"].astype(bool)
-        chart_df = df[
-            (df["prix_achat"] == prix_achat)
-            & (df["apport"] == apport)
-            & (direct_mask | (df["frais_gestion_pct"] == frais_gestion))
-        ].copy()
-        if "mode_location" in chart_df.columns:
-            chart_df = chart_df[chart_df["mode_location"] == mode_location]
-        if "regime_fiscal" in chart_df.columns:
-            chart_df = chart_df[chart_df["regime_fiscal"] == regime_fiscal]
-        if not chart_df.empty:
-            chart_df["gestion"] = chart_df["gestion_agence"].map(_gestion_label)
-            chart_df["duree_credit"] = chart_df["duree_annees"].map(lambda duree: f"{int(duree)} ans")
-            chart_df["vacance"] = chart_df["vacance_mois"].map(lambda mois: f"{mois:g} mois")
-            fig = px.line(
-                chart_df.sort_values("taux_credit"),
-                x="taux_credit",
-                y="cashflow_mensuel_apres_impot",
-                color="duree_credit",
-                line_dash="vacance",
-                facet_col="gestion",
-                markers=True,
-                labels={
-                    "taux_credit": "Taux",
-                    "cashflow_mensuel_apres_impot": "Cash-flow mensuel",
-                    "duree_credit": "Duree",
-                    "vacance": "Vacance",
-                    "gestion": "Gestion",
-                },
-            )
-            st.plotly_chart(fig, width="stretch")
-
-        distribution = df.copy()
-        distribution["gestion"] = distribution["gestion_agence"].map(_gestion_label)
-        hist = px.histogram(
-            distribution,
-            x="cashflow_mensuel_apres_impot",
-            color="gestion",
-            nbins=40,
-            labels={
-                "cashflow_mensuel_apres_impot": "Cash-flow mensuel annee 1",
-                "gestion": "Gestion",
-            },
-        )
-        st.plotly_chart(hist, width="stretch")
-
-
-def _plot_heatmap(df: pd.DataFrame, value: str, label: str) -> None:
-    pivot = df.pivot_table(
-        index="taux_credit",
-        columns="duree_annees",
-        values=value,
-        aggfunc="mean",
-    )
-    fig = px.imshow(
-        pivot,
-        text_auto=".0f",
-        aspect="auto",
-        color_continuous_scale="RdYlGn",
-        labels={"x": "Duree", "y": "Taux", "color": label},
-    )
-    st.plotly_chart(fig, width="stretch")
-
-
-def _cashflow_status(value: float, seuils: SeuilsDecision) -> str:
-    if value >= seuils.cashflow_mensuel_cible:
-        return "OK"
-    if value >= seuils.cashflow_mensuel_min:
-        return "Attention"
-    return "Bloquant"
-
-
-def _threshold_status(value: float, minimum: float) -> str:
-    return "OK" if value >= minimum else "Bloquant"
-
-
-def _decision_map(
-    df: pd.DataFrame,
-    annonce: AnnonceRecord,
-    bien: BienImmobilier,
-    location: HypothesesLocation,
-) -> None:
-    st.subheader("Carte de decision")
-    seuils = SeuilsDecision()
-    best = df.iloc[0]
-    cashflow = float(best["cashflow_mensuel_apres_impot"])
-    viables = df[df["cashflow_mensuel_apres_impot"] >= seuils.cashflow_mensuel_min]
-    pct_viable = len(viables) / len(df) * 100 if len(df) else 0.0
-
-    agence_df = df[df["gestion_agence"].astype(bool)]
-    if agence_df.empty:
-        agence_value = "Non simulee"
-        agence_status = "Neutre"
-        agence_detail = "Active la gestion agence si elle doit rester viable."
-    else:
-        agence_cashflow = float(agence_df["cashflow_mensuel_apres_impot"].max())
-        agence_value = f"{agence_cashflow:,.0f} EUR/mois"
-        agence_status = _cashflow_status(agence_cashflow, seuils)
-        agence_detail = "Meilleur cash-flow avec agence."
-
-    prudent_df = df[df["vacance_mois"] >= 1.0]
-    prudent_cashflow = float(prudent_df["cashflow_mensuel_apres_impot"].max()) if not prudent_df.empty else cashflow
-    dpe = (annonce.dpe or "").strip().upper()[:1]
-    if not dpe:
-        dpe_status = "Attention"
-        dpe_value = "A verifier"
-    elif dpe in seuils.dpe_a_eviter:
-        dpe_status = "Bloquant"
-        dpe_value = dpe
-    else:
-        dpe_status = "OK"
-        dpe_value = dpe
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        _decision_factor(
-            "Cash-flow",
-            f"{cashflow:,.0f} EUR/mois",
-            _cashflow_status(cashflow, seuils),
-            "Meilleur scenario calcule, moyenne mensuelle annee 1.",
-        )
-    with c2:
-        _decision_factor(
-            "Scenarios viables",
-            f"{len(viables):,} / {len(df):,}",
-            "OK" if pct_viable >= 50 else "Attention" if pct_viable > 0 else "Bloquant",
-            f"{pct_viable:.0f} % des scenarios restent au-dessus de {seuils.cashflow_mensuel_min:,.0f} EUR/mois.",
-        )
-    with c3:
-        _decision_factor(
-            "Gestion agence",
-            agence_value,
-            agence_status,
-            agence_detail,
-        )
-
-    c4, c5, c6 = st.columns(3)
-    with c4:
-        _decision_factor(
-            "Vacance prudente",
-            f"{prudent_cashflow:,.0f} EUR/mois",
-            _cashflow_status(prudent_cashflow, seuils),
-            "Meilleur scenario avec au moins 1 mois de vacance par an.",
-        )
-    with c5:
-        rendement_net = float(best["rendement_net_avant_impot_pct"])
-        _decision_factor(
-            "Rendement net",
-            f"{rendement_net:.2f} %",
-            _threshold_status(rendement_net, seuils.rendement_net_min_pct),
-            f"Seuil indicatif : {seuils.rendement_net_min_pct:.1f} % avant impot.",
-        )
-    with c6:
-        _decision_factor(
-            "DPE",
-            dpe_value,
-            dpe_status,
-            "F/G a traiter comme risque bloquant sans decote et travaux maitrises.",
-        )
-
-    st.subheader("Diagnostic reglementaire")
-    location_best = replace(location, loyer_hc_mensuel=float(best["loyer_hc_mensuel"]))
-    diagnostics = diagnostiquer_annonce(bien, location_best)
-    if not diagnostics:
-        st.info("Aucun diagnostic local disponible pour cette annonce.")
-        return
-    for item in diagnostics:
-        status = _diagnostic_status_label(item.status)
-        detail = item.message
-        if item.seuil is not None:
-            detail = f"{detail} Seuil : {item.seuil}."
-        _decision_factor(
-            item.code.replace("_", " "),
-            str(item.valeur) if item.valeur is not None else "-",
-            status,
-            detail,
-        )
-
-
 def main() -> None:
     st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
     _require_authentication()
     st.title("Simulateur d'Achat immobilier locatif")
-    _require_current_runtime_api()
+    _require_current_runtime_api(RUNTIME_API_CONTEXT)
 
     database_url = _configured_database_url()
     if database_url:
@@ -1619,7 +951,7 @@ def main() -> None:
     with tab_dashboard:
         dashboard_page(conn, rows)
     with tab_annonce:
-        _annonce_page(conn, annonce, hypotheses)
+        annonce_page(conn, annonce, hypotheses)
     with tab_hypotheses:
         _hypotheses_page(conn, annonce, hypotheses)
     with tab_simulation:
