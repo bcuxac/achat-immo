@@ -20,6 +20,24 @@ if SRC_PATH_STR in sys.path:
     sys.path.remove(SRC_PATH_STR)
 sys.path.insert(0, SRC_PATH_STR)
 
+
+def _force_repo_source_package(package_name: str) -> None:
+    expected_root = (SRC_PATH / package_name).resolve()
+    for module_name, module in list(sys.modules.items()):
+        if module_name != package_name and not module_name.startswith(f"{package_name}."):
+            continue
+        module_file = getattr(module, "__file__", None)
+        if module_file is None:
+            del sys.modules[module_name]
+            continue
+        try:
+            Path(module_file).resolve().relative_to(expected_root)
+        except ValueError:
+            del sys.modules[module_name]
+
+
+_force_repo_source_package("achat_immo")
+
 from achat_immo.auth import verify_password
 from achat_immo.grids import (
     GrilleResultat,
@@ -423,6 +441,12 @@ def _runtime_api_errors() -> list[str]:
     for parameter_name in ("fiscalite", "scenario_base", "gestion_agence_possible"):
         if parameter_name not in simulate_params:
             errors.append(f"simuler_grille_annonce ne supporte pas {parameter_name}.")
+    if errors:
+        grids_module = sys.modules.get("achat_immo.grids")
+        models_module = sys.modules.get("achat_immo.models")
+        errors.append(f"achat_immo.grids charge depuis : {getattr(grids_module, '__file__', 'inconnu')}")
+        errors.append(f"achat_immo.models charge depuis : {getattr(models_module, '__file__', 'inconnu')}")
+        errors.append(f"src attendu : {SRC_PATH}")
     return errors
 
 

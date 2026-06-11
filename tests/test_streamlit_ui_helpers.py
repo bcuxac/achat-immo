@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from inspect import signature
+import sys
+from types import ModuleType
 
 from app import streamlit_app as ui
 from achat_immo.models import ModeLocation, RegimeFiscal
@@ -48,3 +50,13 @@ def test_streamlit_imports_current_engine_api() -> None:
     assert "taux_actualisation_pct" in scenario_params
     assert {"fiscalite", "gestion_agence_possible"} <= set(count_params)
     assert {"fiscalite", "scenario_base", "gestion_agence_possible"} <= set(simulate_params)
+
+
+def test_force_repo_source_package_removes_foreign_cached_modules(tmp_path) -> None:
+    module = ModuleType("dummy_package")
+    module.__file__ = str(tmp_path / "dummy_package" / "__init__.py")
+    sys.modules["dummy_package"] = module
+
+    ui._force_repo_source_package("dummy_package")
+
+    assert "dummy_package" not in sys.modules
