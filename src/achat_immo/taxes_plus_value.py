@@ -96,14 +96,28 @@ def calcul_plus_value(
     *,
     amortissements_lmnp_deduits_plus_value: float = 0.0,
 ) -> PlusValueResult:
-    """Calcule l'impot de sortie utilise dans le flux terminal."""
+    """Calcule l'impot de sortie utilise dans le flux terminal.
+    
+    IMPORTANT - Optisation fiscale (Forfaits) :
+    La loi francaise permet de majorer le prix d'acquisition pour reduire la plus-value taxable :
+    - Forfait acquisition : on retient le maximum entre les frais reels (notaire+agence) et un forfait fixe de 7.5% du prix d'achat, sans justificatif.
+    - Forfait travaux : si le bien est detenu depuis au moins 5 ans, on retient le maximum entre les travaux reels et un forfait de 15% du prix d'achat, sans aucun justificatif requis.
+    Le simulateur applique automatiquement ces forfaits si cela est mathematiquement avantageux pour maximiser le TRI.
+    """
 
     prix_cession_net = _round_euros(valeur_bien * (1 - frais_revente_pct / 100))
+    
+    frais_acq_reels = bien.frais_agence_achat + bien.frais_notaire_estimes
+    frais_acq = max(frais_acq_reels, bien.prix_achat * 0.075)
+
+    frais_travaux = bien.travaux_estimes
+    if duree_detention_annees >= 5:
+        frais_travaux = max(frais_travaux, bien.prix_achat * 0.15)
+
     prix_acquisition_total = _round_euros(
         bien.prix_achat
-        + bien.frais_agence_achat
-        + bien.frais_notaire_estimes
-        + bien.travaux_estimes
+        + frais_acq
+        + frais_travaux
     )
     amortissements_reintegres = 0.0
     if regime == RegimeFiscal.LMNP_REEL and fiscalite.reintegrer_amortissements_lmnp_plus_value:

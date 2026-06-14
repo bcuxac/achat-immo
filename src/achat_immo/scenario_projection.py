@@ -61,7 +61,7 @@ def simuler_projection_annuelle(
         mensualites_totales = float(credit_annee["mensualite_totale"])
         crd = float(credit_annee["crd_fin"]) if annee in credit_par_annee_map else 0.0
         revenus = revenus_annuels_hc(location, annee)
-        charges = charges_annuelles(location, revenus, scenario)
+        charges = charges_annuelles(location, revenus, scenario, annee)
         total_charges = total_charges_annuelles(charges)
         fiscal = resultat_fiscal(
             bien=bien,

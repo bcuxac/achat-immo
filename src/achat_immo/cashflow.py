@@ -46,10 +46,12 @@ def charges_annuelles(
     location: HypothesesLocation,
     revenus_hc: float,
     scenario: Scenario | None = None,
+    annee: int = 1,
 ) -> dict[str, float]:
     """Charges annuelles supportees par le bailleur."""
 
     multiplicateur = scenario.charges_multiplicateur if scenario else 1.0
+    croissance_charges = (1 + location.evolution_charges_annuelles_pct / 100) ** max(annee - 1, 0)
     charges_non_recuperables = max(
         location.charges_copro_annuelles - location.charges_recuperables_annuelles,
         0.0,
@@ -60,16 +62,16 @@ def charges_annuelles(
         else 0.0
     )
     charges = {
-        "charges_non_recuperables": charges_non_recuperables,
-        "taxe_fonciere": location.taxe_fonciere,
-        "assurance_pno": location.assurance_pno,
-        "assurance_gli": location.assurance_gli,
+        "charges_non_recuperables": charges_non_recuperables * croissance_charges,
+        "taxe_fonciere": location.taxe_fonciere * croissance_charges,
+        "assurance_pno": location.assurance_pno * croissance_charges,
+        "assurance_gli": location.assurance_gli * croissance_charges,
         "gestion_locative": frais_gestion,
-        "cfe": location.cfe_annuelle,
-        "comptable_lmnp": location.comptable_lmnp,
-        "entretien": location.entretien_annuel,
-        "travaux_futurs": location.travaux_futurs_annuels,
-        "autres": location.autres_charges_annuelles,
+        "cfe": location.cfe_annuelle * croissance_charges,
+        "comptable_lmnp": location.comptable_lmnp * croissance_charges,
+        "entretien": location.entretien_annuel * croissance_charges,
+        "travaux_futurs": location.travaux_futurs_annuels * croissance_charges,
+        "autres": location.autres_charges_annuelles * croissance_charges,
     }
     return {key: round(value * multiplicateur, 2) for key, value in charges.items()}
 

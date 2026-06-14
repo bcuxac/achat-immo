@@ -24,15 +24,30 @@ def fiscalite_location_nue(
     annee: int = 1,
     etat: EtatFiscal | None = None,
 ) -> ResultatFiscal:
-    """Location nue au reel, avec report de deficit foncier sans imputation globale."""
+    """Location nue au reel, avec report de deficit foncier et imputation sur revenu global."""
 
     etat = etat or EtatFiscal()
     etat.deficit_foncier = _reports_valides(etat.deficit_foncier, annee, 10)
     deficit_report_debut = _total_reports(etat.deficit_foncier)
     resultat = revenus - charges_deductibles - interets
     if resultat < 0:
-        deficit_genere = _round_euros(-resultat)
-        etat.deficit_foncier.append(ReportFiscal(annee, deficit_genere))
+        revenu_apres_interets = revenus - interets
+        if revenu_apres_interets < 0:
+            excedent_interets = -revenu_apres_interets
+            deficit_autres_charges = charges_deductibles
+            imputation_globale = min(deficit_autres_charges, 10_700.0)
+            deficit_a_reporter = excedent_interets + (deficit_autres_charges - imputation_globale)
+        else:
+            deficit_autres_charges = charges_deductibles - revenu_apres_interets
+            imputation_globale = min(deficit_autres_charges, 10_700.0)
+            deficit_a_reporter = deficit_autres_charges - imputation_globale
+
+        deficit_a_reporter = _round_euros(deficit_a_reporter)
+        if deficit_a_reporter > 0:
+            etat.deficit_foncier.append(ReportFiscal(annee, deficit_a_reporter))
+
+        economie_impot = -_round_euros(imputation_globale * fiscalite.tmi_pct / 100)
+
         return ResultatFiscal(
             regime=RegimeFiscal.LOCATION_NUE_REEL,
             revenus=_round_euros(revenus),
@@ -41,10 +56,10 @@ def fiscalite_location_nue(
             amortissement=0.0,
             resultat_avant_amortissement=_round_euros(resultat),
             resultat_fiscal=0.0,
-            impot=0.0,
+            impot=economie_impot,
             deficit_report_debut=deficit_report_debut,
             deficit_report_fin=_total_reports(etat.deficit_foncier),
-            deficit_genere=deficit_genere,
+            deficit_genere=_round_euros(-resultat),
         )
 
     deficit_utilise, reports_restants = _consommer_reports(etat.deficit_foncier, resultat)

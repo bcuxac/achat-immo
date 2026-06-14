@@ -135,6 +135,7 @@ class HypothesesLocation:
     charges_recuperables_mensuelles: float = 0.0
     vacance_mois_par_an: float = 1.0
     evolution_loyer_annuelle_pct: float = 0.0
+    evolution_charges_annuelles_pct: float = 0.0
     charges_copro_annuelles: float = 0.0
     charges_recuperables_annuelles: float = 0.0
     taxe_fonciere: float = 0.0
@@ -222,7 +223,8 @@ class Fiscalite:
     seuil_micro_foncier: float = 15_000.0
     taux_impot_plus_value_pct: float = 19.0
     taux_prelevements_sociaux_plus_value_pct: float = 17.2
-    reintegrer_amortissements_lmnp_plus_value: bool = True
+    # Sous la legislation actuelle, le LMNP ne reintegre pas les amortissements pour la PV
+    reintegrer_amortissements_lmnp_plus_value: bool = False
     surtaxe_plus_value_active: bool = True
 
     def __post_init__(self) -> None:
