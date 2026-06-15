@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from achat_immo.fiscal_rules import prelevements_sociaux_par_regime
+from achat_immo.engines.fiscal_rules import prelevements_sociaux_par_regime
 from achat_immo.models import Fiscalite, ModeLocation, RegimeFiscal
 
 

@@ -1,5 +1,5 @@
-from achat_immo.taxes_reports import consommer_reports, reports_valides, total_reports
-from achat_immo.taxes_types import ReportFiscal
+from achat_immo.engines.taxes_reports import consommer_reports, reports_valides, total_reports
+from achat_immo.engines.taxes_types import ReportFiscal
 
 
 def test_reports_valides_filtre_expiration_montants_nuls_et_arrondit() -> None:

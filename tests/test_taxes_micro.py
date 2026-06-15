@@ -1,5 +1,5 @@
 from achat_immo.models import Fiscalite, RegimeFiscal
-from achat_immo.taxes_micro import fiscalite_micro_bic, fiscalite_micro_foncier
+from achat_immo.engines.taxes_micro import fiscalite_micro_bic, fiscalite_micro_foncier
 
 
 def test_micro_bic_signale_le_depassement_du_seuil() -> None:

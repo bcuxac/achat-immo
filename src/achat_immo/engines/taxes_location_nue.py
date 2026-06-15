@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from achat_immo.models import Fiscalite, RegimeFiscal
-from achat_immo.taxes_reports import (
+from achat_immo.engines.taxes_reports import (
     consommer_reports as _consommer_reports,
     reports_valides as _reports_valides,
     total_reports as _total_reports,
 )
-from achat_immo.taxes_types import EtatFiscal, ReportFiscal, ResultatFiscal
-from achat_immo.taxes_utils import (
+from achat_immo.engines.taxes_types import EtatFiscal, ReportFiscal, ResultatFiscal
+from achat_immo.engines.taxes_utils import (
     impot_sur_resultat as _impot_sur_resultat,
     round_euros as _round_euros,
 )

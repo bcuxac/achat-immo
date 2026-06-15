@@ -26,14 +26,14 @@ from achat_immo.hypothesis_inference import (
     appliquer_suggestions,
     inferer_hypotheses_depuis_annonce,
 )
-from achat_immo.fiscal_rules import (
+from achat_immo.engines.fiscal_rules import (
     prelevements_sociaux_par_regime,
     regime_fiscal_recommande,
     regimes_compatibles,
 )
 from achat_immo.robustness import RobustesseGrille, analyser_grille
 from achat_immo.storage import fiscalite_from_hypotheses
-from achat_immo.scenarios import (
+from achat_immo.engines.scenarios import (
     scenario_central,
     scenario_optimiste,
     scenario_pessimiste,

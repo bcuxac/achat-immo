@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from achat_immo.taxes_types import ReportFiscal
-from achat_immo.taxes_utils import round_euros as _round_euros
+from achat_immo.engines.taxes_types import ReportFiscal
+from achat_immo.engines.taxes_utils import round_euros as _round_euros
 
 
 def reports_valides(reports: list[ReportFiscal], annee: int, duree_annees: int) -> list[ReportFiscal]:

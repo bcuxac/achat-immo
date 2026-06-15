@@ -15,7 +15,7 @@ from achat_immo.models import (
     HypothesesLocation,
     TypeBien,
 )
-from achat_immo.scenarios import scenario_central, simuler_bien_sur_horizon
+from achat_immo.engines.scenarios import scenario_central, simuler_bien_sur_horizon
 
 
 def _float(row: pd.Series, column: str, default: float = 0.0) -> float:

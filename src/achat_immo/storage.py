@@ -69,9 +69,10 @@ def save_annonce(
             INSERT INTO annonces (
                 date_creation, url, ville, quartier, adresse, type_bien, nb_pieces,
                 epoque_construction, secteur_encadrement, surface_m2,
-                prix_affiche, prix_negocie, dpe, description, statut, notes
+                prix_affiche, prix_negocie, dpe, description, statut, notes,
+                tri_p50, tri_p10, probabilite_cashflow_positif, prix_cible_recommande, cashflow_p50, coc_p50
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         if conn.is_postgres:
             insert_sql += " RETURNING id"
@@ -94,6 +95,12 @@ def save_annonce(
                 annonce.description,
                 annonce.statut,
                 annonce.notes,
+                annonce.tri_p50,
+                annonce.tri_p10,
+                annonce.probabilite_cashflow_positif,
+                annonce.prix_cible_recommande,
+                annonce.cashflow_p50,
+                annonce.coc_p50,
             ),
         )
         if conn.is_postgres:
@@ -109,7 +116,8 @@ def save_annonce(
             SET url = ?, ville = ?, quartier = ?, adresse = ?, type_bien = ?,
                 nb_pieces = ?, epoque_construction = ?, secteur_encadrement = ?, surface_m2 = ?,
                 prix_affiche = ?, prix_negocie = ?, dpe = ?, description = ?,
-                statut = ?, notes = ?
+                statut = ?, notes = ?, tri_p50 = ?, tri_p10 = ?, probabilite_cashflow_positif = ?,
+                prix_cible_recommande = ?, cashflow_p50 = ?, coc_p50 = ?
             WHERE id = ?
             """,
             (
@@ -128,6 +136,12 @@ def save_annonce(
                 annonce.description,
                 annonce.statut,
                 annonce.notes,
+                annonce.tri_p50,
+                annonce.tri_p10,
+                annonce.probabilite_cashflow_positif,
+                annonce.prix_cible_recommande,
+                annonce.cashflow_p50,
+                annonce.coc_p50,
                 annonce_id,
             ),
         )

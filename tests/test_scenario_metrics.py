@@ -1,7 +1,7 @@
 import pytest
 
 from achat_immo.models import BienImmobilier, Scenario
-from achat_immo.scenario_metrics import tri_annuel_approx, valeur_bien, van
+from achat_immo.engines.scenario_metrics import tri_annuel_approx, valeur_bien, van
 
 
 def test_valeur_bien_applique_l_appreciation_composee() -> None:

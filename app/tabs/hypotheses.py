@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from achat_immo.fiscal_rules import (
+from achat_immo.engines.fiscal_rules import (
     regime_fiscal_recommande,
     regimes_compatibles,
 )
@@ -70,7 +70,7 @@ def hypotheses_page(
             _badge_caption("mode_location")
             loyer_reference = st.number_input(
                 "Loyer HC de reference",
-                min_value=1.0,
+                min_value=0.0,
                 value=float(hypotheses.loyer_hc_mensuel),
                 step=10.0,
                 help=FIELD_HELP["loyer_hc_mensuel"],
@@ -364,6 +364,10 @@ def _hypotheses_inference_panel(
     annonce: AnnonceRecord,
     hypotheses: HypothesesAchatRecord,
 ) -> None:
+    if annonce.surface_m2 <= 0.0 or annonce.prix_affiche <= 0.0:
+        st.info("💡 Renseignez une surface et un prix dans l'onglet 'Annonce' pour obtenir des suggestions automatiques.")
+        return
+
     suggestions = inferer_hypotheses_depuis_annonce(annonce, hypotheses)
     suggestions_df = _suggestions_dataframe(hypotheses, suggestions)
     with st.expander("Suggestions automatiques depuis l'annonce", expanded=not suggestions_df.empty):

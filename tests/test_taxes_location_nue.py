@@ -1,6 +1,6 @@
 from achat_immo.models import Fiscalite, RegimeFiscal
-from achat_immo.taxes_location_nue import fiscalite_location_nue
-from achat_immo.taxes_types import EtatFiscal, ReportFiscal
+from achat_immo.engines.taxes_location_nue import fiscalite_location_nue
+from achat_immo.engines.taxes_types import EtatFiscal, ReportFiscal
 
 
 def test_location_nue_expire_anciens_deficits_et_consomme_le_solde() -> None:

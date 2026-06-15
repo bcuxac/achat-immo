@@ -36,7 +36,13 @@ _SQLITE_SCHEMA = """
             dpe TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL DEFAULT '',
             statut TEXT NOT NULL DEFAULT 'a_analyser',
-            notes TEXT NOT NULL DEFAULT ''
+            notes TEXT NOT NULL DEFAULT '',
+            tri_p50 REAL,
+            tri_p10 REAL,
+            probabilite_cashflow_positif REAL,
+            prix_cible_recommande REAL,
+            cashflow_p50 REAL,
+            coc_p50 REAL
         );
 
         CREATE TABLE IF NOT EXISTS hypotheses_achat (
@@ -144,7 +150,13 @@ _POSTGRES_SCHEMA = """
             dpe TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL DEFAULT '',
             statut TEXT NOT NULL DEFAULT 'a_analyser',
-            notes TEXT NOT NULL DEFAULT ''
+            notes TEXT NOT NULL DEFAULT '',
+            tri_p50 DOUBLE PRECISION,
+            tri_p10 DOUBLE PRECISION,
+            probabilite_cashflow_positif DOUBLE PRECISION,
+            prix_cible_recommande DOUBLE PRECISION,
+            cashflow_p50 DOUBLE PRECISION,
+            coc_p50 DOUBLE PRECISION
         );
 
         CREATE TABLE IF NOT EXISTS hypotheses_achat (
@@ -259,6 +271,12 @@ def _migrate_annonces(conn: DatabaseConnection) -> None:
         "nb_pieces": "ALTER TABLE annonces ADD COLUMN nb_pieces INTEGER",
         "epoque_construction": "ALTER TABLE annonces ADD COLUMN epoque_construction TEXT NOT NULL DEFAULT 'inconnue'",
         "secteur_encadrement": "ALTER TABLE annonces ADD COLUMN secteur_encadrement TEXT NOT NULL DEFAULT ''",
+        "tri_p50": "ALTER TABLE annonces ADD COLUMN tri_p50 REAL",
+        "tri_p10": "ALTER TABLE annonces ADD COLUMN tri_p10 REAL",
+        "probabilite_cashflow_positif": "ALTER TABLE annonces ADD COLUMN probabilite_cashflow_positif REAL",
+        "prix_cible_recommande": "ALTER TABLE annonces ADD COLUMN prix_cible_recommande REAL",
+        "cashflow_p50": "ALTER TABLE annonces ADD COLUMN cashflow_p50 REAL",
+        "coc_p50": "ALTER TABLE annonces ADD COLUMN coc_p50 REAL",
     }
     for column, statement in migrations.items():
         if column not in columns:

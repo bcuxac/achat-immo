@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from achat_immo.cashflow import appliquer_scenario_location, rendement_brut, rendement_net
-from achat_immo.loan import credit_par_annee, tableau_amortissement
+from achat_immo.engines.cashflow import appliquer_scenario_location, rendement_brut, rendement_net
+from achat_immo.engines.loan import credit_par_annee, tableau_amortissement
 from achat_immo.models import (
     BienImmobilier,
     Financement,
@@ -18,12 +18,12 @@ from achat_immo.models import (
     ResultatSimulation,
     Scenario,
 )
-from achat_immo.scenario_metrics import (
+from achat_immo.engines.scenario_metrics import (
     tri_annuel_approx,
     valeur_bien,
     van,
 )
-from achat_immo.scenario_projection import simuler_projection_annuelle
+from achat_immo.engines.scenario_projection import simuler_projection_annuelle
 
 
 def scenario_central(horizon_annees: int = 20) -> Scenario:

@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from achat_immo.city_profiles import loyer_max_hc_mensuel, profile_for_city
-from achat_immo.fiscal_rules import regimes_compatibles
+from achat_immo.engines.fiscal_rules import regimes_compatibles
 from achat_immo.grids import (
     GrilleParametres,
     compter_scenarios_grille,
@@ -58,6 +58,11 @@ def simulation_page(
     if annonce is None or hypotheses is None:
         st.info("Selectionne une annonce.")
         return
+        
+    if annonce.surface_m2 <= 0.0 or annonce.prix_affiche <= 0.0:
+        st.warning("Impossible d'afficher la simulation : veuillez d'abord renseigner la surface et le prix de l'annonce.")
+        return
+        
     bien, location, _ = to_domain_models(annonce, hypotheses)
     fiscalite = fiscalite_from_hypotheses(hypotheses)
 

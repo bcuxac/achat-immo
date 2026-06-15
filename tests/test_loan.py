@@ -1,4 +1,4 @@
-from achat_immo.loan import (
+from achat_immo.engines.loan import (
     capital_restant_du,
     calcul_mensualite,
     credit_par_annee,

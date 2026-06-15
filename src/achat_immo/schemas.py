@@ -20,8 +20,8 @@ class AnnonceRecordSchema(BoundaryModel):
     """Contrat valide pour une annonce stockee ou saisie."""
 
     ville: str
-    surface_m2: float = Field(gt=0)
-    prix_affiche: float = Field(gt=0)
+    surface_m2: float = Field(ge=0)
+    prix_affiche: float = Field(ge=0)
     id: int | None = None
     date_creation: str = ""
     url: str = ""
@@ -36,6 +36,13 @@ class AnnonceRecordSchema(BoundaryModel):
     description: str = ""
     statut: str = "a_analyser"
     notes: str = ""
+    # Metrics
+    tri_p50: float | None = None
+    tri_p10: float | None = None
+    probabilite_cashflow_positif: float | None = None
+    prix_cible_recommande: float | None = None
+    cashflow_p50: float | None = None
+    coc_p50: float | None = None
 
 
 class HypothesesAchatRecordSchema(BoundaryModel):
@@ -48,7 +55,7 @@ class HypothesesAchatRecordSchema(BoundaryModel):
     meubles_estimes: float = Field(default=0.0, ge=0)
     frais_bancaires: float = Field(default=0.0, ge=0)
     garantie: float = Field(default=0.0, ge=0)
-    loyer_hc_mensuel: float = Field(default=650.0, gt=0)
+    loyer_hc_mensuel: float = Field(default=650.0, ge=0)
     mode_location: ModeLocation = ModeLocation.MEUBLEE
     charges_copro_annuelles: float = Field(default=0.0, ge=0)
     charges_recuperables_annuelles: float = Field(default=0.0, ge=0)

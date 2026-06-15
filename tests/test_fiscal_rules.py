@@ -1,4 +1,4 @@
-from achat_immo.fiscal_rules import (
+from achat_immo.engines.fiscal_rules import (
     prelevements_sociaux_par_regime,
     regime_fiscal_recommande,
     regimes_compatibles,

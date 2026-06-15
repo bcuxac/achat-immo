@@ -25,14 +25,14 @@ def create_blank_annonce(conn: Any) -> int:
     return save_annonce(
         conn,
         AnnonceRecord(
-            ville="Grenoble",
-            surface_m2=30.0,
-            prix_affiche=80_000.0,
-            nb_pieces=2,
-            secteur_encadrement=SECTEUR_A_VERIFIER,
+            ville="",
+            surface_m2=0.0,
+            prix_affiche=0.0,
+            nb_pieces=1,
+            secteur_encadrement="",
             statut="a_analyser",
         ),
-        HypothesesAchatRecord(loyer_hc_mensuel=500.0),
+        HypothesesAchatRecord(loyer_hc_mensuel=0.0),
     )
 
 

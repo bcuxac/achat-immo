@@ -21,8 +21,32 @@ gestion locative et fiscalite.
 - villes cibles fermees avec profils locaux pour borner les hypotheses legales ;
 - plafond de loyer local applique automatiquement quand il est calculable ;
 - diagnostic reglementaire separe du score financier ;
-- decision robuste fondee sur toute la distribution des scenarios ;
-- comparaison boursiere volontairement mise de cote pour l'instant.
+- décision robuste fondée sur toute la distribution des scénarios ;
+- comparaison boursière volontairement mise de côté pour l'instant.
+
+## Moteur Probabiliste (Monte Carlo)
+
+Le simulateur dispose d'une couche d'analyse stochastique par méthode de Monte Carlo pour évaluer la robustesse d'une stratégie d'investissement face aux incertitudes (vacance locative, loyer effectif, travaux imprévus, plus-value, etc.).
+
+**Principe :**
+1. Vous définissez une `Strategy` (ville, type de bien, apport, régime fiscal...).
+2. Vous configurez des distributions probabilistes pour les variables incertaines (ex: `TriangularDist`, `TruncatedNormalDist`).
+3. Le moteur génère des centaines de scénarios et les évalue à travers le moteur de projection déterministe.
+4. Les KPIs sont agrégés pour obtenir des statistiques robustes (TRI médian, TRI P10 pessimiste, probabilité de cash-flow négatif).
+
+**Lancer un exemple :**
+```bash
+uv run python scripts/monte_carlo_grenoble.py
+```
+
+**Interpréter les résultats :**
+- **TRI P50 (Médian)** : Le rendement le plus probable.
+- **TRI P10 (Pessimiste)** : Dans 90% des cas, vous ferez mieux que ce chiffre. C'est l'indicateur de risque clé.
+- **Probabilité de Cash-flow positif** : Estime votre chance de ne pas avoir à sortir de l'épargne tous les mois pour couvrir le projet.
+- **Sensibilité** : Met en évidence les variables qui ont le plus d'impact sur votre rentabilité (via une corrélation de Spearman).
+
+**Génération de Critères de Recherche :**
+Plutôt que d'évaluer les annonces une par une, l'outil propose un Solver Inversé (`InverseSolver`). Il fait varier les paramètres d'entrée (prix d'achat max, loyer cible) pour trouver la "zone" mathématique qui satisfait vos objectifs probabilistes (ex: TRI P10 > 3%). Ces critères pourront ensuite être utilisés pour configurer un agent de sourcing automatique.
 
 ## Architecture
 
@@ -30,15 +54,14 @@ gestion locative et fiscalite.
 src/
 ├── achat_immo/
 │   ├── models.py       # dataclasses metier
-│   ├── loan.py         # mensualites, CRD, tableau d'amortissement
-│   ├── cashflow.py     # loyers, charges, rendements, cash-flow
-│   ├── taxes.py        # LMNP reel, nue reel, micro-BIC, micro-foncier
-│   ├── scenarios.py    # simulations annuelles
-│   ├── grids.py        # grilles automatiques loyer x taux x duree x apport
+│   ├── schemas.py      # validation pydantic
+│   ├── engines/        # moteurs deterministes (credit, cashflow, taxes, projections)
+│   ├── stochastic/     # moteur monte carlo, distributions, generateur
+│   ├── analysis/       # statistiques et analyses de sensibilite
+│   ├── search_policy/  # solver inverse generant les criteres de recherche
+│   ├── deal_scoring/   # notation globale des annonces
 │   ├── city_profiles.py# profils locaux : villes ciblees, encadrement, plafonds
 │   ├── diagnostics.py  # points bloquants, donnees manquantes et alertes metier
-│   ├── hypothesis_inference.py # pre-remplissage auditable des hypotheses
-│   ├── robustness.py   # decision robuste, percentiles et conditions de validite
 │   ├── storage.py      # stockage SQLite local
 │   ├── comparison.py   # scoring et classement
 │   ├── export.py       # CSV, Excel, Markdown
@@ -158,12 +181,14 @@ l'interface web. Les ecritures vont vers PostgreSQL.
 ## Exemple Python
 
 ```python
-from achat_immo import (
+from achat_immo.models import (
     BienImmobilier,
     Financement,
     Fiscalite,
     HypothesesLocation,
     TypeBien,
+)
+from achat_immo.engines.scenarios import (
     scenario_central,
     simuler_bien_sur_horizon,
 )

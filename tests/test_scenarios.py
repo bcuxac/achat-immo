@@ -7,7 +7,7 @@ from achat_immo.models import (
     RegimeFiscal,
     TypeBien,
 )
-from achat_immo.scenarios import (
+from achat_immo.engines.scenarios import (
     scenario_central,
     simuler_bien_sur_horizon,
 )

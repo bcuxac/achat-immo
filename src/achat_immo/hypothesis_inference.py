@@ -12,7 +12,7 @@ import re
 import unicodedata
 
 from achat_immo.city_profiles import loyer_max_hc_mensuel, profile_for_city
-from achat_immo.fiscal_rules import (
+from achat_immo.engines.fiscal_rules import (
     prelevements_sociaux_par_regime,
     regime_fiscal_recommande,
     regimes_compatibles as _regimes_compatibles,
@@ -53,7 +53,7 @@ class HypothesisSuggestion:
 
 
 def regimes_compatibles(mode_location: ModeLocation) -> tuple[RegimeFiscal, ...]:
-    """Compatibilite historique : utiliser `achat_immo.fiscal_rules` directement."""
+    """Compatibilite historique : utiliser `achat_immo.engines.fiscal_rules` directement."""
 
     return _regimes_compatibles(mode_location)
 

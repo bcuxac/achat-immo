@@ -1,6 +1,6 @@
 from achat_immo.models import BienImmobilier, Fiscalite, TypeBien
-from achat_immo.taxes_lmnp import fiscalite_lmnp_reel_annuelle
-from achat_immo.taxes_types import EtatFiscal
+from achat_immo.engines.taxes_lmnp import fiscalite_lmnp_reel_annuelle
+from achat_immo.engines.taxes_types import EtatFiscal
 
 
 def _bien_avec_frais() -> BienImmobilier:

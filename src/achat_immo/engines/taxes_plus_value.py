@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from achat_immo.models import BienImmobilier, Fiscalite, RegimeFiscal
-from achat_immo.taxes_utils import round_euros as _round_euros
+from achat_immo.engines.taxes_utils import round_euros as _round_euros
 
 
 @dataclass(frozen=True, slots=True)

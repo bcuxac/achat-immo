@@ -8,25 +8,25 @@ deficit, regimes micro, deficit foncier suivi separement et fiscalite de sortie.
 from __future__ import annotations
 
 from achat_immo.models import BienImmobilier, Fiscalite, ModeLocation, RegimeFiscal
-from achat_immo.taxes_location_nue import fiscalite_location_nue as fiscalite_location_nue
-from achat_immo.taxes_lmnp import (
+from achat_immo.engines.taxes_location_nue import fiscalite_location_nue as fiscalite_location_nue
+from achat_immo.engines.taxes_lmnp import (
     amortissement_lmnp as amortissement_lmnp,
     amortissements_lmnp_par_composant as amortissements_lmnp_par_composant,
     fiscalite_lmnp_reel as fiscalite_lmnp_reel,
     fiscalite_lmnp_reel_annuelle as _fiscalite_lmnp_reel_annuelle,
 )
-from achat_immo.taxes_micro import (
+from achat_immo.engines.taxes_micro import (
     fiscalite_micro_bic as fiscalite_micro_bic,
     fiscalite_micro_foncier as fiscalite_micro_foncier,
 )
-from achat_immo.taxes_plus_value import (
+from achat_immo.engines.taxes_plus_value import (
     PlusValueResult as PlusValueResult,
     abattement_plus_value_ir_pct as abattement_plus_value_ir_pct,
     abattement_plus_value_ps_pct as abattement_plus_value_ps_pct,
     calcul_plus_value as calcul_plus_value,
     surtaxe_plus_value_elevee as surtaxe_plus_value_elevee,
 )
-from achat_immo.taxes_types import (
+from achat_immo.engines.taxes_types import (
     EtatFiscal as EtatFiscal,
     ResultatFiscal as ResultatFiscal,
 )

@@ -12,7 +12,7 @@ import pandas as pd
 from achat_immo.comparison import scorer_bien
 from achat_immo.city_profiles import borner_loyers_hc
 from achat_immo.diagnostics import diagnostiquer_annonce
-from achat_immo.fiscal_rules import prelevements_sociaux_par_regime, regimes_compatibles
+from achat_immo.engines.fiscal_rules import prelevements_sociaux_par_regime, regimes_compatibles
 from achat_immo.models import (
     BienImmobilier,
     Financement,
@@ -23,7 +23,7 @@ from achat_immo.models import (
     ResultatSimulation,
     Scenario,
 )
-from achat_immo.scenarios import scenario_central, simuler_bien_sur_horizon
+from achat_immo.engines.scenarios import scenario_central, simuler_bien_sur_horizon
 
 
 GRID_API_VERSION = "multi_regime_grid_v1"

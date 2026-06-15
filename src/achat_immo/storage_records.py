@@ -33,6 +33,13 @@ class AnnonceRecord:
     description: str = ""
     statut: str = "a_analyser"
     notes: str = ""
+    # Metrics pre-calculees par l'Orchestrateur (Monte Carlo & Solveur)
+    tri_p50: float | None = None
+    tri_p10: float | None = None
+    probabilite_cashflow_positif: float | None = None
+    prix_cible_recommande: float | None = None
+    cashflow_p50: float | None = None
+    coc_p50: float | None = None
 
 
 @dataclass(slots=True)

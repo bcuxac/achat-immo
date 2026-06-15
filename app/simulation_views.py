@@ -11,7 +11,7 @@ import streamlit as st
 from achat_immo.comparison import SeuilsDecision
 from achat_immo.diagnostics import diagnostiquer_annonce
 from achat_immo.grids import GrilleResultat
-from achat_immo.loan import tableau_amortissement
+from achat_immo.engines.loan import tableau_amortissement
 from achat_immo.models import (
     BienImmobilier,
     HypothesesLocation,

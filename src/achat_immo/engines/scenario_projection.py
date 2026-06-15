@@ -6,12 +6,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from achat_immo.cashflow import charges_annuelles, revenus_annuels_hc, total_charges_annuelles
+from achat_immo.engines.cashflow import charges_annuelles, revenus_annuels_hc, total_charges_annuelles
 from achat_immo.models import BienImmobilier, Fiscalite, HypothesesLocation, Scenario
-from achat_immo.scenario_metrics import valeur_bien
-from achat_immo.taxes import EtatFiscal, calcul_plus_value, resultat_fiscal
-from achat_immo.taxes_plus_value import PlusValueResult
-from achat_immo.taxes_types import ResultatFiscal
+from achat_immo.engines.scenario_metrics import valeur_bien
+from achat_immo.engines.taxes import EtatFiscal, calcul_plus_value, resultat_fiscal
+from achat_immo.engines.taxes_plus_value import PlusValueResult
+from achat_immo.engines.taxes_types import ResultatFiscal
 
 
 @dataclass(frozen=True, slots=True)

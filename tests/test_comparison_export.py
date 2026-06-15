@@ -5,7 +5,7 @@ import pandas as pd
 from achat_immo.comparison import classer_biens, scorer_bien
 from achat_immo.export import export_csv, export_excel
 from achat_immo.models import BienImmobilier, Financement, Fiscalite, HypothesesLocation
-from achat_immo.scenarios import scenario_central, simuler_bien_sur_horizon
+from achat_immo.engines.scenarios import scenario_central, simuler_bien_sur_horizon
 
 
 def test_score_rejette_cashflow_trop_negatif() -> None:

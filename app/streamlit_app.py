@@ -49,12 +49,12 @@ from achat_immo.storage import (
     DEFAULT_DB_PATH,
     open_database,
 )
-from app.pages.annonce import annonce_page
-from app.pages.comparison import comparison_page
-from app.pages.dashboard import dashboard_page
-from app.pages.history import history_page
-from app.pages.hypotheses import hypotheses_page
-from app.pages.simulation import simulation_page
+from app.tabs.annonce import annonce_page
+from app.tabs.comparison import comparison_page
+from app.tabs.dashboard import dashboard_page
+from app.tabs.history import history_page
+from app.tabs.hypotheses import hypotheses_page
+from app.tabs.simulation import simulation_page
 from app.runtime_config import (
     configured_database_url as _configured_database_url,
     require_authentication as _require_authentication,
@@ -103,6 +103,13 @@ def _runtime_api_errors() -> list[str]:
 
 
 def main() -> None:
+    # Charger les variables d'environnement depuis .env (ex: GEMINI_API_KEY)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+        
     st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
     _require_authentication()
     st.title("Simulateur d'Achat immobilier locatif")
