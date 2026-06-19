@@ -6,10 +6,43 @@ from google import genai
 from typing import Optional, List
 import os
 import json
+from shutil import which
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 
 from achat_immo.deal_scoring.candidate_property import CandidateProperty
+
+
+CHROMIUM_CANDIDATES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")
+CHROMIUM_CONTAINER_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+]
+
+
+def resolve_chromium_executable() -> str | None:
+    """Retourne un Chromium systeme quand le cache Playwright n'est pas disponible."""
+
+    explicit_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "").strip()
+    if explicit_path:
+        return explicit_path
+
+    for candidate in CHROMIUM_CANDIDATES:
+        executable_path = which(candidate)
+        if executable_path:
+            return executable_path
+    return None
+
+
+def chromium_launch_options() -> dict[str, object]:
+    options: dict[str, object] = {"headless": True, "args": CHROMIUM_CONTAINER_ARGS}
+    executable_path = resolve_chromium_executable()
+    if executable_path:
+        options["executable_path"] = executable_path
+    return options
+
 
 class LLMPropertySchema(BaseModel):
     """Schéma de données attendu par l'IA lors de la lecture d'une annonce."""
@@ -43,7 +76,7 @@ class LLMSourcingAgent:
         """Tente de récupérer le contenu textuel d'une URL via Playwright."""
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser = p.chromium.launch(**chromium_launch_options())
                 context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     viewport={"width": 1280, "height": 720}
