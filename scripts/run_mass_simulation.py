@@ -16,6 +16,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from achat_immo.mass_simulation import executer_simulation_masse
 
+
+def format_metric(value: float, column: str, label: str) -> str:
+    if "pct" in column or "%" in label:
+        if column == "travaux_pct":
+            return f"{value * 100:.1f}%"
+        return f"{value:.1f}%"
+    return f"{value:.1f}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simulation de Masse d'investissements immobiliers.")
     parser.add_argument("--nb", type=int, default=10000, help="Nombre de biens a simuler (defaut: 10000)")
@@ -93,15 +102,13 @@ def main() -> None:
             p100 = pepites[col].max()
             p50 = pepites[col].median()
             
-            if "pct" in col or "%" in label:
-                if col == "travaux_pct":
-                    fmt = lambda x: f"{x*100:.1f}%"
-                else:
-                    fmt = lambda x: f"{x:.1f}%"
-            else:
-                fmt = lambda x: f"{x:.1f}"
-                
-            table.add_row(label, fmt(mean_val), fmt(p0), fmt(p100), fmt(p50))
+            table.add_row(
+                label,
+                format_metric(mean_val, col, label),
+                format_metric(p0, col, label),
+                format_metric(p100, col, label),
+                format_metric(p50, col, label),
+            )
             
     console.print(table)
     

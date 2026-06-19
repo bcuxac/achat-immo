@@ -82,10 +82,6 @@ def comparison_page(conn: DatabaseConnection, rows: list[dict[str, Any]], annonc
         return
     st.divider()
     st.subheader("Statut de l'annonce active")
-    st.caption(
-        "Ce statut sert au suivi de ton pipeline personnel : a analyser, a visiter, a negocier, favori, "
-        "rejete ou archive."
-    )
     with st.form("decision_form"):
         statut = st.selectbox(
             "Statut",

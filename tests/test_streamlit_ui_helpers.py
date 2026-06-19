@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from inspect import signature
+import os
 import subprocess
 import sys
 from types import ModuleType
 
 from app import streamlit_app as ui
+from app import runtime_config
 from achat_immo.models import ModeLocation, RegimeFiscal
 
 
@@ -38,6 +40,26 @@ def test_derived_fiscal_values_use_regime_constants() -> None:
 def test_guided_interface_section_labels_are_centralized() -> None:
     assert ui.SIMULATION_SECTION_LABELS == ("Exploitation", "Strategies testees", "Analyse")
     assert ui.PORTFOLIO_DECISION_LABEL == "Decision portefeuille"
+
+
+def test_runtime_secrets_are_exposed_to_environment(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    def fake_secret_section(key: str) -> dict[str, str]:
+        if key == "database":
+            return {"url": "postgresql://example.test/db"}
+        if key == "gemini":
+            return {"api_key": "gemini-secret"}
+        return {}
+
+    monkeypatch.setattr(runtime_config, "_secret_section", fake_secret_section)
+    monkeypatch.setattr(runtime_config, "_secret_value", lambda key, default=None: default)
+
+    runtime_config.apply_runtime_secrets_to_environment()
+
+    assert os.environ["DATABASE_URL"] == "postgresql://example.test/db"
+    assert os.environ["GEMINI_API_KEY"] == "gemini-secret"
 
 
 def test_streamlit_imports_current_engine_api() -> None:

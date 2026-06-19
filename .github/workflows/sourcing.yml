@@ -1,0 +1,78 @@
+name: Sourcing immobilier
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Nombre maximal d'URLs de queue a examiner"
+        required: false
+        default: "20"
+      source_limit:
+        description: "Nombre maximal d'URLs a charger par source"
+        required: false
+        default: "3"
+      allowed_domains:
+        description: "Domaines autorises, separes par des virgules"
+        required: false
+        default: "jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr"
+  schedule:
+    - cron: "17 5 * * *"
+
+concurrency:
+  group: sourcing-immobilier
+  cancel-in-progress: false
+
+jobs:
+  process-queue:
+    name: Traiter la queue de sourcing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PYTHONPATH: src
+      SOURCING_LIMIT: ${{ github.event.inputs.limit || vars.SOURCING_LIMIT || '20' }}
+      SOURCING_SOURCE_LIMIT: ${{ github.event.inputs.source_limit || vars.SOURCING_SOURCE_LIMIT || '3' }}
+      SOURCING_ALLOWED_DOMAINS: ${{ github.event.inputs.allowed_domains || vars.SOURCING_ALLOWED_DOMAINS || 'jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr' }}
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer les dependances
+        run: uv sync --frozen
+
+      - name: Installer Chromium Playwright
+        run: uv run playwright install --with-deps chromium
+
+      - name: Verifier les secrets
+        run: |
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "::error::Le secret GEMINI_API_KEY est requis pour traiter la queue."
+            exit 1
+          fi
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::warning::DATABASE_URL est absent. Le run utilisera SQLite ephemeral sur le runner GitHub."
+          fi
+
+      - name: Traiter les URLs en attente
+        run: |
+          args=(--process-queue --limit "${SOURCING_LIMIT}" --source-limit "${SOURCING_SOURCE_LIMIT}")
+          IFS=',' read -ra domains <<< "${SOURCING_ALLOWED_DOMAINS}"
+          for raw_domain in "${domains[@]}"; do
+            domain="$(echo "${raw_domain}" | xargs)"
+            if [ -n "${domain}" ]; then
+              args+=(--allowed-domain "${domain}")
+            fi
+          done
+          uv run python scripts/run_orchestrator.py "${args[@]}"

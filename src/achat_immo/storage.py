@@ -11,11 +11,16 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from achat_immo.schemas import (
+    AnalysisRunRecordSchema,
     AnnonceRecordSchema,
+    ExtractionRunRecordSchema,
     HypothesesAchatRecordSchema,
     SimulationResultRowSchema,
+    SourcingQueueRecordSchema,
+    SourcingRunRecordSchema,
 )
 from achat_immo.storage_connection import (
     DEFAULT_DB_PATH,
@@ -27,12 +32,32 @@ from achat_immo.storage_mapping import (
     fiscalite_from_hypotheses as fiscalite_from_hypotheses,
     to_domain_models as to_domain_models,
 )
-from achat_immo.storage_records import AnnonceRecord, HypothesesAchatRecord
+from achat_immo.storage_records import (
+    AnalysisRunRecord,
+    AnnonceRecord,
+    ExtractionRunRecord,
+    HypothesesAchatRecord,
+    SourcingQueueRecord,
+    SourcingRunRecord,
+)
 from achat_immo.storage_schema import init_db
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def normalize_source_url(url: str) -> str:
+    """Normalise une URL source pour la deduplication conservative."""
+
+    value = url.strip()
+    if not value:
+        raise ValueError("L'URL source ne peut pas etre vide.")
+    parsed = urlsplit(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value.rstrip("/")
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
 
 
 def open_database(db_path: str | Path | None = DEFAULT_DB_PATH) -> DatabaseConnection:
@@ -245,6 +270,22 @@ def list_annonces(conn: DatabaseConnection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def find_annonce_id_by_url(conn: DatabaseConnection, url: str) -> int | None:
+    """Retourne l'annonce connue pour une URL canonique si elle existe."""
+
+    normalized_url = normalize_source_url(url)
+    row = conn.execute(
+        """
+        SELECT id
+        FROM annonces
+        WHERE url = ?
+        ORDER BY id DESC
+        """,
+        (normalized_url,),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
 def update_decision(
     conn: DatabaseConnection,
     annonce_id: int,
@@ -343,13 +384,13 @@ def save_simulation_run(
                 row["effort_epargne_mensuel"],
                 row["rendement_net_avant_impot_pct"],
                 row["rendement_net_net_pct"],
-                row.get("tri_annuel_pct", row.get("tri")),
+                row.get("tri_annuel_pct"),
                 row.get("van"),
-                row.get("cash_on_cash_return_pct", row.get("cash_on_cash")),
+                row.get("cash_on_cash_return_pct"),
                 row.get("impots_total_horizon", 0.0),
                 row.get("impot_plus_value", 0.0),
                 row["patrimoine_net_horizon"],
-                row.get("patrimoine_net_sortie", row["patrimoine_net_horizon"]),
+                row["patrimoine_net_sortie"],
                 row.get("break_even_year"),
                 row.get("nb_annees_cashflow_negatif", 0),
                 row["score"],
@@ -401,13 +442,499 @@ def get_simulation_results(conn: DatabaseConnection, run_id: int) -> list[dict[s
     return [dict(row) for row in rows]
 
 
+def save_extraction_run(conn: DatabaseConnection, run: ExtractionRunRecord) -> int:
+    """Sauvegarde une trace d'extraction IA/scraping."""
+
+    data = ExtractionRunRecordSchema.model_validate(run).model_dump()
+    insert_sql = """
+        INSERT INTO extraction_runs (
+            annonce_id, date_run, source_url, final_url, status, model,
+            input_chars, raw_content_hash, extracted_source, red_flags,
+            missing_fields, error_message
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            data["annonce_id"],
+            data["date_run"] or _now_iso(),
+            data["source_url"],
+            data["final_url"],
+            data["status"],
+            data["model"],
+            data["input_chars"],
+            data["raw_content_hash"],
+            data["extracted_source"],
+            data["red_flags"],
+            data["missing_fields"],
+            data["error_message"],
+        ),
+    )
+    if conn.is_postgres:
+        row = cursor.fetchone()
+        run_id = int(row["id"])
+    else:
+        run_id = int(cursor.lastrowid)
+    conn.commit()
+    return run_id
+
+
+def list_extraction_runs(conn: DatabaseConnection, annonce_id: int | None = None) -> list[dict[str, Any]]:
+    if annonce_id is None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM extraction_runs
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM extraction_runs
+            WHERE annonce_id = ?
+            ORDER BY id DESC
+            """,
+            (annonce_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_analysis_run(conn: DatabaseConnection, run: AnalysisRunRecord) -> int:
+    """Sauvegarde une trace d'analyse Monte Carlo et solveur inverse."""
+
+    data = AnalysisRunRecordSchema.model_validate(run).model_dump()
+    insert_sql = """
+        INSERT INTO analysis_runs (
+            annonce_id, date_run, status, scenario_seed, nb_scenarios,
+            solver_status, solver_iterations, price_floor, price_ceiling,
+            target_tri_median, target_tri_p10, target_coc, target_cashflow,
+            tri_p50, tri_p10, probabilite_cashflow_positif, coc_p50,
+            cashflow_p50, recommended_price, recommended_project_cost,
+            recommended_apport, recommended_loan_amount, summary_json, diagnostics
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            data["annonce_id"],
+            data["date_run"] or _now_iso(),
+            data["status"],
+            data["scenario_seed"],
+            data["nb_scenarios"],
+            data["solver_status"],
+            data["solver_iterations"],
+            data["price_floor"],
+            data["price_ceiling"],
+            data["target_tri_median"],
+            data["target_tri_p10"],
+            data["target_coc"],
+            data["target_cashflow"],
+            data["tri_p50"],
+            data["tri_p10"],
+            data["probabilite_cashflow_positif"],
+            data["coc_p50"],
+            data["cashflow_p50"],
+            data["recommended_price"],
+            data["recommended_project_cost"],
+            data["recommended_apport"],
+            data["recommended_loan_amount"],
+            data["summary_json"],
+            data["diagnostics"],
+        ),
+    )
+    if conn.is_postgres:
+        row = cursor.fetchone()
+        run_id = int(row["id"])
+    else:
+        run_id = int(cursor.lastrowid)
+    conn.commit()
+    return run_id
+
+
+def list_analysis_runs(conn: DatabaseConnection, annonce_id: int | None = None) -> list[dict[str, Any]]:
+    if annonce_id is None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM analysis_runs
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM analysis_runs
+            WHERE annonce_id = ?
+            ORDER BY id DESC
+            """,
+            (annonce_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def enqueue_sourcing_url(
+    conn: DatabaseConnection,
+    url: str,
+    *,
+    source: str = "manual",
+    priority: int = 0,
+) -> int:
+    """Ajoute une URL a la file sans creer de doublon."""
+
+    source_url = normalize_source_url(url)
+    now = _now_iso()
+    existing = conn.execute(
+        "SELECT * FROM sourcing_queue WHERE source_url = ?",
+        (source_url,),
+    ).fetchone()
+    if existing is not None:
+        row = dict(existing)
+        should_requeue = row["status"] in {"blocked", "failed", "skipped"}
+        status = "pending" if should_requeue else row["status"]
+        last_error = "" if should_requeue else row["last_error"]
+        conn.execute(
+            """
+            UPDATE sourcing_queue
+            SET date_update = ?, source = ?, status = ?, priority = ?, last_error = ?
+            WHERE id = ?
+            """,
+            (
+                now,
+                source,
+                status,
+                max(int(row["priority"]), priority),
+                last_error,
+                row["id"],
+            ),
+        )
+        conn.commit()
+        return int(row["id"])
+
+    record = SourcingQueueRecordSchema.model_validate(
+        SourcingQueueRecord(
+            source_url=source_url,
+            date_creation=now,
+            date_update=now,
+            source=source,
+            priority=priority,
+        )
+    ).model_dump()
+    insert_sql = """
+        INSERT INTO sourcing_queue (
+            date_creation, date_update, source_url, source, status, priority,
+            attempts, annonce_id, last_error, last_processed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            record["date_creation"],
+            record["date_update"],
+            record["source_url"],
+            record["source"],
+            record["status"],
+            record["priority"],
+            record["attempts"],
+            record["annonce_id"],
+            record["last_error"],
+            record["last_processed_at"],
+        ),
+    )
+    if conn.is_postgres:
+        row = cursor.fetchone()
+        queue_id = int(row["id"])
+    else:
+        queue_id = int(cursor.lastrowid)
+    conn.commit()
+    return queue_id
+
+
+def list_sourcing_queue(conn: DatabaseConnection, status: str | None = None) -> list[dict[str, Any]]:
+    if status is None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM sourcing_queue
+            ORDER BY priority DESC, id ASC
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM sourcing_queue
+            WHERE status = ?
+            ORDER BY priority DESC, id ASC
+            """,
+            (status,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_sourcing_queue_item(conn: DatabaseConnection, queue_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM sourcing_queue WHERE id = ?",
+        (queue_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_sourcing_queue_item(
+    conn: DatabaseConnection,
+    queue_id: int,
+    *,
+    source: str,
+    priority: int,
+) -> None:
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET source = ?, priority = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (source, priority, _now_iso(), queue_id),
+    )
+    conn.commit()
+
+
+def list_pending_sourcing_urls(conn: DatabaseConnection, limit: int = 20) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM sourcing_queue
+        WHERE status = 'pending'
+        ORDER BY priority DESC, id ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_sourcing_url_pending(conn: DatabaseConnection, queue_id: int, *, clear_error: bool = True) -> None:
+    now = _now_iso()
+    if clear_error:
+        conn.execute(
+            """
+            UPDATE sourcing_queue
+            SET status = 'pending', last_error = '', date_update = ?
+            WHERE id = ?
+            """,
+            (now, queue_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE sourcing_queue
+            SET status = 'pending', date_update = ?
+            WHERE id = ?
+            """,
+            (now, queue_id),
+        )
+    conn.commit()
+
+
+def count_sourcing_queue(conn: DatabaseConnection, status: str | None = None) -> int:
+    if status is None:
+        row = conn.execute("SELECT COUNT(*) AS count FROM sourcing_queue").fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM sourcing_queue WHERE status = ?",
+            (status,),
+        ).fetchone()
+    return int(row["count"])
+
+
+def create_sourcing_run(conn: DatabaseConnection, run: SourcingRunRecord) -> int:
+    """Cree une synthese de run avant traitement de queue."""
+
+    data = SourcingRunRecordSchema.model_validate(run).model_dump()
+    insert_sql = """
+        INSERT INTO sourcing_runs (
+            date_start, date_end, status, url_limit, source_limit,
+            allowed_domains, skip_prefilter, pending_at_start,
+            examined_count, processed_count, successes, failures,
+            skipped, blocked, pending_after, error_message
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            data["date_start"] or _now_iso(),
+            data["date_end"],
+            data["status"],
+            data["url_limit"],
+            data["source_limit"],
+            data["allowed_domains"],
+            int(data["skip_prefilter"]),
+            data["pending_at_start"],
+            data["examined_count"],
+            data["processed_count"],
+            data["successes"],
+            data["failures"],
+            data["skipped"],
+            data["blocked"],
+            data["pending_after"],
+            data["error_message"],
+        ),
+    )
+    if conn.is_postgres:
+        row = cursor.fetchone()
+        run_id = int(row["id"])
+    else:
+        run_id = int(cursor.lastrowid)
+    conn.commit()
+    return run_id
+
+
+def complete_sourcing_run(
+    conn: DatabaseConnection,
+    run_id: int,
+    *,
+    status: str,
+    examined_count: int,
+    processed_count: int,
+    successes: int,
+    failures: int,
+    skipped: int,
+    blocked: int,
+    pending_after: int,
+    error_message: str = "",
+) -> None:
+    """Finalise une synthese de traitement de queue."""
+
+    conn.execute(
+        """
+        UPDATE sourcing_runs
+        SET date_end = ?, status = ?, examined_count = ?, processed_count = ?,
+            successes = ?, failures = ?, skipped = ?, blocked = ?,
+            pending_after = ?, error_message = ?
+        WHERE id = ?
+        """,
+        (
+            _now_iso(),
+            status,
+            examined_count,
+            processed_count,
+            successes,
+            failures,
+            skipped,
+            blocked,
+            pending_after,
+            error_message[:1000],
+            run_id,
+        ),
+    )
+    conn.commit()
+
+
+def list_sourcing_runs(conn: DatabaseConnection, limit: int = 50) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM sourcing_runs
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_sourcing_url_processing(conn: DatabaseConnection, queue_id: int) -> None:
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'processing', attempts = attempts + 1, date_update = ?
+        WHERE id = ?
+        """,
+        (_now_iso(), queue_id),
+    )
+    conn.commit()
+
+
+def mark_sourcing_url_success(conn: DatabaseConnection, queue_id: int, annonce_id: int) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'done', annonce_id = ?, last_error = '', last_processed_at = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (annonce_id, now, now, queue_id),
+    )
+    conn.commit()
+
+
+def mark_sourcing_url_failure(conn: DatabaseConnection, queue_id: int, error_message: str) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'failed', last_error = ?, last_processed_at = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (error_message[:1000], now, now, queue_id),
+    )
+    conn.commit()
+
+
+def mark_sourcing_url_skipped(conn: DatabaseConnection, queue_id: int, reason: str) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'skipped', last_error = ?, last_processed_at = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (reason[:1000], now, now, queue_id),
+    )
+    conn.commit()
+
+
+def mark_sourcing_url_blocked(conn: DatabaseConnection, queue_id: int, reason: str) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'blocked', last_error = ?, last_processed_at = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (reason[:1000], now, now, queue_id),
+    )
+    conn.commit()
+
+
 def reset_identity_sequences(conn: DatabaseConnection) -> None:
     """Aligne les sequences PostgreSQL apres une importation avec ids explicites."""
 
     if not conn.is_postgres:
         return
 
-    for table in ("annonces", "simulation_runs", "simulation_results"):
+    for table in (
+        "annonces",
+        "simulation_runs",
+        "simulation_results",
+        "extraction_runs",
+        "analysis_runs",
+        "sourcing_queue",
+        "sourcing_runs",
+    ):
         row = conn.execute(f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {table}").fetchone()
         max_id = int(row["max_id"])
         if max_id > 0:

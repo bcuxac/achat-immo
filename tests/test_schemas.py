@@ -43,7 +43,7 @@ def test_hypotheses_schema_valide_la_coherence_des_charges() -> None:
         )
 
 
-def test_simulation_result_row_schema_accepte_alias_et_nan() -> None:
+def test_simulation_result_row_schema_accepte_nan_sur_champs_canoniques() -> None:
     row = SimulationResultRowSchema.model_validate(
         {
             "scenario": "central",
@@ -60,9 +60,10 @@ def test_simulation_result_row_schema_accepte_alias_et_nan() -> None:
             "effort_epargne_mensuel": 120,
             "rendement_net_avant_impot_pct": 4.2,
             "rendement_net_net_pct": 3.8,
-            "tri": math.nan,
-            "cash_on_cash": math.nan,
+            "tri_annuel_pct": math.nan,
+            "cash_on_cash_return_pct": math.nan,
             "patrimoine_net_horizon": 20_000,
+            "patrimoine_net_sortie": 20_000,
             "score": 60,
             "decision": "a_creuser",
         }

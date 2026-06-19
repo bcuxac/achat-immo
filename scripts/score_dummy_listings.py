@@ -37,7 +37,6 @@ def main():
         "appreciation_bien_annuelle_pct": TruncatedNormalDist(0.5, 1.0, -2.0, 3.0),
     }
     
-    generator = ScenarioGenerator(config, seed=42)
     runner = MonteCarloRunner()
     
     # 3. On score chaque annonce

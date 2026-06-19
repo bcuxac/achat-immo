@@ -6,7 +6,6 @@ from typing import Any
 
 import streamlit as st
 
-from achat_immo.city_profiles import SECTEUR_A_VERIFIER
 from achat_immo.storage import (
     AnnonceRecord,
     HypothesesAchatRecord,

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
 import streamlit as st
 
+from achat_immo.analysis.manual_analysis import AnalysisTargets, rerun_financial_analysis
 from achat_immo.city_profiles import (
     SECTEUR_A_VERIFIER,
     canonical_city_label,
@@ -17,9 +20,9 @@ from achat_immo.storage import (
     HypothesesAchatRecord,
     save_annonce,
 )
-from app.ui_helpers import enum_label as _enum_label
 from achat_immo.sourcing_agents.llm_agent import LLMSourcingAgent
-import os
+from achat_immo.sourcing_agents.orchestrator import SourcingOrchestrator
+from app.ui_helpers import enum_label as _enum_label
 
 
 def annonce_page(
@@ -49,8 +52,66 @@ def annonce_page(
             
         st.divider()
 
+    with st.expander("Relance d'analyse"):
+        c1, c2, c3, c4 = st.columns(4)
+        target_tri = c1.number_input("TRI median cible (%)", value=6.0, step=0.5, key=f"target_tri_{annonce.id}")
+        target_tri_p10 = c2.number_input("TRI P10 cible (%)", value=3.0, step=0.5, key=f"target_tri_p10_{annonce.id}")
+        target_coc = c3.number_input("CoC cible (%)", value=0.0, step=0.5, key=f"target_coc_{annonce.id}")
+        target_cf = c4.number_input("Cashflow cible", value=0.0, step=25.0, key=f"target_cf_{annonce.id}")
+        targets = AnalysisTargets(
+            target_tri_median=float(target_tri),
+            target_tri_p10=float(target_tri_p10),
+            target_coc=float(target_coc),
+            target_cashflow=float(target_cf),
+        )
+        action_cols = st.columns(2)
+        if action_cols[0].button(
+            "Relancer l'analyse financiere",
+            type="primary",
+            width="stretch",
+            key=f"rerun_financial_analysis_{annonce.id}",
+        ):
+            with st.spinner("Analyse Monte Carlo et solveur en cours..."):
+                try:
+                    result = rerun_financial_analysis(
+                        conn,
+                        annonce,
+                        hypotheses,
+                        targets=targets,
+                        run_source="streamlit_manual",
+                    )
+                except Exception as exc:
+                    st.error(f"Analyse impossible : {exc}")
+                else:
+                    st.success(f"Analyse sauvegardee. Run #{result.analysis_run_id}, statut {result.status}.")
+                    st.rerun()
+        if action_cols[1].button(
+            "Relancer sourcing complet depuis l'URL",
+            width="stretch",
+            key=f"rerun_full_sourcing_{annonce.id}",
+        ):
+            if not annonce.url:
+                st.error("Aucune URL n'est associee a cette annonce.")
+            elif not os.environ.get("GEMINI_API_KEY"):
+                st.error("GEMINI_API_KEY est requis dans l'environnement ou Streamlit secrets.")
+            else:
+                with st.spinner("Extraction IA, Monte Carlo et solveur en cours..."):
+                    try:
+                        orchestrator = SourcingOrchestrator(
+                            target_tri=float(target_tri),
+                            target_tri_p10=float(target_tri_p10),
+                            target_coc=float(target_coc),
+                            target_cf=float(target_cf),
+                        )
+                        annonce_id = orchestrator.process_url(conn, annonce.url)
+                    except Exception as exc:
+                        st.error(f"Sourcing impossible : {exc}")
+                    else:
+                        st.success(f"Sourcing complet sauvegarde. Annonce #{annonce_id}.")
+                        st.rerun()
+
     # --- IA SOURCING ---
-    with st.expander("🤖 Remplissage automatique par IA"):
+    with st.expander("Remplissage automatique par IA"):
         st.write("Collez l'URL de l'annonce ou son texte pour que Gemini et Playwright extraient toutes les données factuelles.")
         
         api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -89,11 +150,16 @@ def annonce_page(
                         
                         # Mise a jour des variables en memoire
                         # On ecrase uniquement si la valeur n'est pas None (pour respecter l'existant)
-                        if prop.prix is not None: annonce.prix_affiche = prop.prix
-                        if prop.surface is not None: annonce.surface_m2 = prop.surface
-                        if prop.dpe is not None and prop.dpe.upper() != "INCONNU": annonce.dpe = prop.dpe.upper()
-                        if prop.ville is not None and prop.ville.upper() != "INCONNU": annonce.ville = prop.ville.upper()
-                        if prop.quartier is not None and prop.quartier.upper() != "INCONNU": annonce.quartier = prop.quartier
+                        if prop.prix is not None:
+                            annonce.prix_affiche = prop.prix
+                        if prop.surface is not None:
+                            annonce.surface_m2 = prop.surface
+                        if prop.dpe is not None and prop.dpe.upper() != "INCONNU":
+                            annonce.dpe = prop.dpe.upper()
+                        if prop.ville is not None and prop.ville.upper() != "INCONNU":
+                            annonce.ville = prop.ville.upper()
+                        if prop.quartier is not None and prop.quartier.upper() != "INCONNU":
+                            annonce.quartier = prop.quartier
                         annonce.url = target_url
                         
                         # Ajout des red flags dans les notes
@@ -106,10 +172,14 @@ def annonce_page(
                             annonce.notes = (annonce.notes or "") + notes_additionnelles
                             
                         # Hypotheses financieres
-                        if prop.loyer_estime is not None: hypotheses.loyer_hc_mensuel = prop.loyer_estime
-                        if prop.charges_mensuelles is not None: hypotheses.charges_copro_annuelles = prop.charges_mensuelles * 12
-                        if prop.taxe_fonciere is not None: hypotheses.taxe_fonciere = prop.taxe_fonciere
-                        if prop.travaux_visibles is not None and prop.travaux_visibles > 0: hypotheses.travaux_estimes = prop.travaux_visibles
+                        if prop.loyer_estime is not None:
+                            hypotheses.loyer_hc_mensuel = prop.loyer_estime
+                        if prop.charges_mensuelles is not None:
+                            hypotheses.charges_copro_annuelles = prop.charges_mensuelles * 12
+                        if prop.taxe_fonciere is not None:
+                            hypotheses.taxe_fonciere = prop.taxe_fonciere
+                        if prop.travaux_visibles is not None and prop.travaux_visibles > 0:
+                            hypotheses.travaux_estimes = prop.travaux_visibles
 
                         save_annonce(conn, annonce, hypotheses)
                         st.success("Extraction réussie et sauvegardée ! Rechargement...")

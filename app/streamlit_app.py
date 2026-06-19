@@ -55,7 +55,9 @@ from app.tabs.dashboard import dashboard_page
 from app.tabs.history import history_page
 from app.tabs.hypotheses import hypotheses_page
 from app.tabs.simulation import simulation_page
+from app.tabs.sourcing_queue import sourcing_queue_page
 from app.runtime_config import (
+    apply_runtime_secrets_to_environment as _apply_runtime_secrets_to_environment,
     configured_database_url as _configured_database_url,
     require_authentication as _require_authentication,
 )
@@ -109,6 +111,7 @@ def main() -> None:
         load_dotenv()
     except ImportError:
         pass
+    _apply_runtime_secrets_to_environment()
         
     st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
     _require_authentication()
@@ -125,12 +128,22 @@ def main() -> None:
     rows, selected_id = _sidebar(conn)
     annonce, hypotheses = _load_bundle(conn, selected_id)
 
-    tab_dashboard, tab_annonce, tab_hypotheses, tab_simulation, tab_comparison, tab_history = st.tabs(
-        ["Tableau de bord", "Annonce", "Hypotheses", "Simulation", PORTFOLIO_DECISION_LABEL, "Historique"]
+    tab_dashboard, tab_queue, tab_annonce, tab_hypotheses, tab_simulation, tab_comparison, tab_history = st.tabs(
+        [
+            "Tableau de bord",
+            "Queue sourcing",
+            "Annonce",
+            "Hypotheses",
+            "Simulation",
+            PORTFOLIO_DECISION_LABEL,
+            "Historique",
+        ]
     )
 
     with tab_dashboard:
         dashboard_page(conn, rows)
+    with tab_queue:
+        sourcing_queue_page(conn)
     with tab_annonce:
         annonce_page(conn, annonce, hypotheses)
     with tab_hypotheses:

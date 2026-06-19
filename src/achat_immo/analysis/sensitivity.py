@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.stats import spearmanr
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 from achat_immo.stochastic.models import ScenarioInput, ScenarioOutput
 
 def analyze_sensitivity(inputs: List[ScenarioInput], outputs: List[ScenarioOutput], target_metric: str = "tri_annuel_pct") -> List[Tuple[str, float]]:

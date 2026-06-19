@@ -39,7 +39,7 @@ def main():
     generator = ScenarioGenerator(stochastic_config, seed=42)
     runner = MonteCarloRunner()
     
-    print(f"\nGénération et exécution de 1000 scénarios...")
+    print("\nGénération et exécution de 1000 scénarios...")
     outputs = runner.run(strategy, generator, n_scenarios=1000)
     
     # 3. Analyse des résultats

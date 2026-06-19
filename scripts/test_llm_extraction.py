@@ -60,12 +60,12 @@ def main():
     
     # URL Jinka fournie par l'utilisateur
     jinka_url = "https://www.jinka.fr/ad/954ca383-7d9b-4d29-a323-c527f442a993?alert_id=9aa8e8eab78a4e21034e334d90719be0"
-    print(f"\n[PHASE 1 : LE RADAR]")
+    print("\n[PHASE 1 : LE RADAR]")
     print(f"Fetch de l'agrégateur: {jinka_url}")
     
     try:
         jinka_html = agent.fetch_url(jinka_url)
-        print(f"Succès du fetch (Jinka) ! Recherche du lien original...")
+        print("Succès du fetch (Jinka) ! Recherche du lien original...")
         
         original_url = agent.extract_original_link(jinka_html)
         
@@ -74,10 +74,10 @@ def main():
         else:
             print(f"Lien original trouvé : {original_url}")
             
-            print(f"\n[PHASE 2 : L'ENRICHISSEMENT]")
+            print("\n[PHASE 2 : L'ENRICHISSEMENT]")
             print(f"Fetch du site de l'agence: {original_url}")
             agency_html = agent.fetch_url(original_url)
-            print(f"Succès du fetch (Agence) ! Envoi à Gemini pour extraction des données...")
+            print("Succès du fetch (Agence) ! Envoi à Gemini pour extraction des données...")
             
             property_url = agent.extract_from_text(agency_html, source_url=original_url)
             

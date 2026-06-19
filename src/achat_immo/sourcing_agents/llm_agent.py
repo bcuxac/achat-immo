@@ -1,6 +1,5 @@
 """Agent de sourcing basé sur un LLM pour extraire les données d'annonces immobilières."""
 
-import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from google import genai

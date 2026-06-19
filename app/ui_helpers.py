@@ -9,10 +9,17 @@ from achat_immo.models import Fiscalite, ModeLocation, RegimeFiscal
 
 
 STATUTS = [
+    "nouveau",
     "a_analyser",
     "diagnostic_incomplet",
+    "donnees_insuffisantes",
+    "hors_criteres",
+    "a_verifier",
+    "shortlist",
     "a_visiter",
     "a_negocier",
+    "contacte",
+    "offre_faite",
     "favori",
     "rejete",
     "archive",

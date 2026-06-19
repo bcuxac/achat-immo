@@ -10,7 +10,15 @@ class MonteCarloRunner:
     
     def run(self, strategy: Strategy, generator: ScenarioGenerator, n_scenarios: int = 1000) -> list[ScenarioOutput]:
         scenarios_input = generator.sample_many(n_scenarios, strategy)
+        return self.run_inputs(strategy, scenarios_input)
         
+    def run_inputs(self, strategy: Strategy, scenarios_input: list[ScenarioInput]) -> list[ScenarioOutput]:
+        """Exécute une stratégie sur un jeu de scénarios déjà tiré.
+
+        Comparer plusieurs prix sur les mêmes aléas évite que le bruit Monte Carlo
+        fasse bouger artificiellement la décision du solveur.
+        """
+
         outputs = []
         for s_in in scenarios_input:
             out = self._run_single(strategy, s_in)

@@ -35,6 +35,29 @@ def configured_database_url() -> str:
     return str(value).strip()
 
 
+def configured_gemini_api_key() -> str:
+    gemini = _secret_section("gemini")
+    value = (
+        gemini.get("api_key")
+        or _secret_value("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+        or ""
+    )
+    return str(value).strip()
+
+
+def apply_runtime_secrets_to_environment() -> None:
+    """Expose les secrets Streamlit aux clients qui lisent encore os.environ."""
+
+    database_url = configured_database_url()
+    if database_url:
+        os.environ["DATABASE_URL"] = database_url
+
+    gemini_api_key = configured_gemini_api_key()
+    if gemini_api_key:
+        os.environ["GEMINI_API_KEY"] = gemini_api_key
+
+
 def _auth_users() -> dict[str, str]:
     auth = _secret_section("auth")
     users = dict(auth.get("users", {}) or {})

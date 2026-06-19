@@ -88,6 +88,92 @@ class HypothesesAchatRecordSchema(BoundaryModel):
         return self
 
 
+class ExtractionRunRecordSchema(BoundaryModel):
+    """Contrat valide pour une trace d'extraction automatique."""
+
+    annonce_id: int
+    id: int | None = None
+    date_run: str = ""
+    source_url: str = ""
+    final_url: str = ""
+    status: str = ""
+    model: str = ""
+    input_chars: int = Field(default=0, ge=0)
+    raw_content_hash: str = ""
+    extracted_source: str = ""
+    red_flags: str = ""
+    missing_fields: str = ""
+    error_message: str = ""
+
+
+class AnalysisRunRecordSchema(BoundaryModel):
+    """Contrat valide pour une trace d'analyse Monte Carlo et solveur."""
+
+    annonce_id: int
+    id: int | None = None
+    date_run: str = ""
+    status: str = ""
+    scenario_seed: int = Field(default=0, ge=0)
+    nb_scenarios: int = Field(default=0, ge=0)
+    solver_status: str = ""
+    solver_iterations: int = Field(default=0, ge=0)
+    price_floor: float | None = Field(default=None, ge=0)
+    price_ceiling: float | None = Field(default=None, ge=0)
+    target_tri_median: float = 0.0
+    target_tri_p10: float = 0.0
+    target_coc: float = 0.0
+    target_cashflow: float = 0.0
+    tri_p50: float | None = None
+    tri_p10: float | None = None
+    probabilite_cashflow_positif: float | None = None
+    coc_p50: float | None = None
+    cashflow_p50: float | None = None
+    recommended_price: float | None = Field(default=None, ge=0)
+    recommended_project_cost: float | None = Field(default=None, ge=0)
+    recommended_apport: float | None = Field(default=None, ge=0)
+    recommended_loan_amount: float | None = Field(default=None, ge=0)
+    summary_json: str = ""
+    diagnostics: str = ""
+
+
+class SourcingQueueRecordSchema(BoundaryModel):
+    """Contrat valide pour une URL dans la file de sourcing."""
+
+    source_url: str
+    id: int | None = None
+    date_creation: str = ""
+    date_update: str = ""
+    source: str = "manual"
+    status: str = "pending"
+    priority: int = 0
+    attempts: int = Field(default=0, ge=0)
+    annonce_id: int | None = None
+    last_error: str = ""
+    last_processed_at: str = ""
+
+
+class SourcingRunRecordSchema(BoundaryModel):
+    """Contrat valide pour une synthese de traitement de queue."""
+
+    id: int | None = None
+    date_start: str = ""
+    date_end: str = ""
+    status: str = "running"
+    url_limit: int = Field(default=0, ge=0)
+    source_limit: int | None = Field(default=None, ge=1)
+    allowed_domains: str = ""
+    skip_prefilter: bool = False
+    pending_at_start: int = Field(default=0, ge=0)
+    examined_count: int = Field(default=0, ge=0)
+    processed_count: int = Field(default=0, ge=0)
+    successes: int = Field(default=0, ge=0)
+    failures: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    blocked: int = Field(default=0, ge=0)
+    pending_after: int = Field(default=0, ge=0)
+    error_message: str = ""
+
+
 class SimulationResultRowSchema(BoundaryModel):
     """Contrat plat pour une ligne persistable de resultat de simulation."""
 
@@ -123,20 +209,6 @@ class SimulationResultRowSchema(BoundaryModel):
     decision: str
     alertes: str = ""
     diagnostics: str = ""
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_legacy_aliases(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        normalized = dict(data)
-        if "tri_annuel_pct" not in normalized and "tri" in normalized:
-            normalized["tri_annuel_pct"] = normalized["tri"]
-        if "cash_on_cash_return_pct" not in normalized and "cash_on_cash" in normalized:
-            normalized["cash_on_cash_return_pct"] = normalized["cash_on_cash"]
-        if "patrimoine_net_sortie" not in normalized and "patrimoine_net_horizon" in normalized:
-            normalized["patrimoine_net_sortie"] = normalized["patrimoine_net_horizon"]
-        return normalized
 
     @field_validator("tri_annuel_pct", "van", "cash_on_cash_return_pct", "break_even_year", mode="before")
     @classmethod

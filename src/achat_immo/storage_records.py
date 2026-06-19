@@ -78,3 +78,93 @@ class HypothesesAchatRecord:
     taux_credit_reference: float = 3.6
     duree_credit_reference: int = 20
     assurance_emprunteur_pct: float = 0.30
+
+
+@dataclass(slots=True)
+class ExtractionRunRecord:
+    """Trace d'une extraction IA ou scraping associee a une annonce."""
+
+    annonce_id: int
+    id: int | None = None
+    date_run: str = ""
+    source_url: str = ""
+    final_url: str = ""
+    status: str = ""
+    model: str = ""
+    input_chars: int = 0
+    raw_content_hash: str = ""
+    extracted_source: str = ""
+    red_flags: str = ""
+    missing_fields: str = ""
+    error_message: str = ""
+
+
+@dataclass(slots=True)
+class AnalysisRunRecord:
+    """Trace d'une analyse Monte Carlo et solveur inverse."""
+
+    annonce_id: int
+    id: int | None = None
+    date_run: str = ""
+    status: str = ""
+    scenario_seed: int = 0
+    nb_scenarios: int = 0
+    solver_status: str = ""
+    solver_iterations: int = 0
+    price_floor: float | None = None
+    price_ceiling: float | None = None
+    target_tri_median: float = 0.0
+    target_tri_p10: float = 0.0
+    target_coc: float = 0.0
+    target_cashflow: float = 0.0
+    tri_p50: float | None = None
+    tri_p10: float | None = None
+    probabilite_cashflow_positif: float | None = None
+    coc_p50: float | None = None
+    cashflow_p50: float | None = None
+    recommended_price: float | None = None
+    recommended_project_cost: float | None = None
+    recommended_apport: float | None = None
+    recommended_loan_amount: float | None = None
+    summary_json: str = ""
+    diagnostics: str = ""
+
+
+@dataclass(slots=True)
+class SourcingQueueRecord:
+    """URL en attente ou deja traitee par l'aspirateur."""
+
+    source_url: str
+    id: int | None = None
+    date_creation: str = ""
+    date_update: str = ""
+    source: str = "manual"
+    status: str = "pending"
+    priority: int = 0
+    attempts: int = 0
+    annonce_id: int | None = None
+    last_error: str = ""
+    last_processed_at: str = ""
+
+
+@dataclass(slots=True)
+class SourcingRunRecord:
+    """Synthese d'un traitement de file de sourcing."""
+
+    id: int | None = None
+    date_start: str = ""
+    date_end: str = ""
+    status: str = "running"
+    url_limit: int = 0
+    source_limit: int | None = None
+    allowed_domains: str = ""
+    skip_prefilter: bool = False
+    pending_at_start: int = 0
+    examined_count: int = 0
+    processed_count: int = 0
+    successes: int = 0
+    failures: int = 0
+    skipped: int = 0
+    blocked: int = 0
+    pending_after: int = 0
+    error_message: str = ""
