@@ -26,7 +26,7 @@ STATUTS = [
 ]
 
 SIMULATION_SECTION_LABELS = ("Exploitation", "Strategies testees", "Analyse")
-PORTFOLIO_DECISION_LABEL = "Decision portefeuille"
+PORTFOLIO_DECISION_LABEL = "Comparaison"
 
 FIELD_ORIGIN = {
     "frais_notaire_estimes": "Saisi",

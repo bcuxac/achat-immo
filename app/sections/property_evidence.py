@@ -16,11 +16,16 @@ from achat_immo.storage import (
 )
 
 
-def history_page(conn: DatabaseConnection, annonce_id: int | None) -> None:
+def property_evidence_section(
+    conn: DatabaseConnection,
+    annonce_id: int | None,
+    *,
+    include_global_sourcing_runs: bool = True,
+) -> None:
     simulation_runs = list_simulation_runs(conn, annonce_id)
     extraction_runs = list_extraction_runs(conn, annonce_id)
     analysis_runs = list_analysis_runs(conn, annonce_id)
-    sourcing_runs = list_sourcing_runs(conn)
+    sourcing_runs = list_sourcing_runs(conn) if include_global_sourcing_runs else []
     if not simulation_runs and not extraction_runs and not analysis_runs and not sourcing_runs:
         st.info("Pas encore d'historique.")
         return
@@ -61,12 +66,14 @@ def history_page(conn: DatabaseConnection, annonce_id: int | None) -> None:
             if status_changes:
                 st.dataframe(pd.DataFrame(status_changes), hide_index=True, width="stretch")
 
-    tab_simulation, tab_extraction, tab_analysis, tab_sourcing = st.tabs(
-        ["Simulations", "Extractions IA", "Analyses auto", "Runs sourcing"]
-    )
+    tab_labels = ["Snapshots financiers", "Extractions IA", "Analyses auto"]
+    if include_global_sourcing_runs:
+        tab_labels.append("Runs sourcing")
+    tabs = st.tabs(tab_labels)
+    tab_simulation, tab_extraction, tab_analysis = tabs[:3]
     with tab_simulation:
         if not simulation_runs:
-            st.info("Aucun snapshot de simulation.")
+            st.info("Aucun snapshot financier.")
         else:
             st.dataframe(pd.DataFrame(simulation_runs), hide_index=True, width="stretch")
             run_id = st.selectbox("Inspecter un snapshot", [int(run["id"]) for run in simulation_runs])
@@ -84,9 +91,10 @@ def history_page(conn: DatabaseConnection, annonce_id: int | None) -> None:
         else:
             st.dataframe(pd.DataFrame(analysis_runs), hide_index=True, width="stretch")
 
-    with tab_sourcing:
-        if not sourcing_runs:
-            st.info("Aucun run de sourcing trace.")
-        else:
-            st.caption("Runs globaux de traitement de queue, non limites a l'annonce selectionnee.")
-            st.dataframe(pd.DataFrame(sourcing_runs), hide_index=True, width="stretch")
+    if include_global_sourcing_runs:
+        with tabs[3]:
+            if not sourcing_runs:
+                st.info("Aucun run de sourcing trace.")
+            else:
+                st.caption("Runs globaux de traitement de queue, non limites a l'annonce selectionnee.")
+                st.dataframe(pd.DataFrame(sourcing_runs), hide_index=True, width="stretch")

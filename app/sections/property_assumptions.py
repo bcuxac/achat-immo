@@ -1,4 +1,4 @@
-"""Page de saisie des hypotheses d'investissement."""
+"""Section de saisie des hypotheses d'investissement d'une fiche annonce."""
 
 from __future__ import annotations
 
@@ -39,16 +39,16 @@ from app.ui_helpers import (
 )
 
 
-def hypotheses_page(
+def property_assumptions_section(
     conn: DatabaseConnection,
     annonce: AnnonceRecord | None,
     hypotheses: HypothesesAchatRecord | None,
 ) -> None:
     if annonce is None or hypotheses is None:
-        st.info("Cree ou selectionne une annonce dans la barre laterale.")
+        st.info("Selectionne une annonce dans la fiche.")
         return
 
-    st.subheader("Hypotheses d'investissement")
+    st.subheader("Hypotheses")
     st.caption(
         "Parcours guide : les champs Saisi sont tes donnees d'entree, les champs Deduit sont calcules "
         "depuis le regime, et les champs Avance restent replis."

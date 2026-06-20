@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from inspect import signature
 import os
+from pathlib import Path
 import subprocess
 import sys
 from types import ModuleType
 
 from app import streamlit_app as ui
 from app import runtime_config
+from app.sections.comparison import filter_comparison_rows
+from app.sections.sourcing_queue import queue_rows_for_view
+from app.views.pipeline import filter_pipeline_items
 from achat_immo.models import ModeLocation, RegimeFiscal
 
 
@@ -39,7 +43,103 @@ def test_derived_fiscal_values_use_regime_constants() -> None:
 
 def test_guided_interface_section_labels_are_centralized() -> None:
     assert ui.SIMULATION_SECTION_LABELS == ("Exploitation", "Strategies testees", "Analyse")
-    assert ui.PORTFOLIO_DECISION_LABEL == "Decision portefeuille"
+    assert ui.PORTFOLIO_DECISION_LABEL == "Comparaison"
+
+
+def test_main_navigation_exposes_workflow_pages() -> None:
+    assert ui.APP_PAGE_LABELS == (
+        "Pipeline",
+        "Queue sourcing",
+        "Fiche annonce",
+        "Comparaison",
+        "Parametres / Automatisation",
+    )
+    assert "Historique" not in ui.APP_PAGE_LABELS
+
+
+def test_streamlit_ui_no_longer_imports_legacy_tabs_package() -> None:
+    app_files = (ui.PROJECT_ROOT / "app").rglob("*.py")
+    offenders = [
+        path.relative_to(ui.PROJECT_ROOT).as_posix()
+        for path in app_files
+        if "app.tabs" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
+def test_property_data_form_does_not_short_circuit_sourcing_queue() -> None:
+    annonce_source = Path(ui.PROJECT_ROOT / "app" / "sections" / "property_data.py").read_text(encoding="utf-8")
+    workflow_source = Path(ui.PROJECT_ROOT / "app" / "views" / "property_workflow.py").read_text(encoding="utf-8")
+
+    assert "LLMSourcingAgent" not in annonce_source
+    assert "GEMINI_API_KEY" not in annonce_source
+    assert "Remplissage automatique" not in annonce_source
+    assert "enqueue_sourcing_url" in workflow_source
+
+
+def test_pipeline_filters_keep_active_work_visible() -> None:
+    items = [
+        {"id": 1, "stage": "shortlist", "statut": "shortlist"},
+        {"id": 2, "stage": "a_verifier", "statut": "a_analyser"},
+        {"id": 3, "stage": "archive", "statut": "archive"},
+    ]
+
+    filtered = filter_pipeline_items(
+        items,
+        selected_stages=("shortlist", "a_verifier", "archive"),
+        include_terminal=False,
+    )
+
+    assert [item["id"] for item in filtered] == [1, 2]
+
+
+def test_sourcing_queue_views_are_operational_groups() -> None:
+    rows = [
+        {"id": 1, "status": "pending"},
+        {"id": 2, "status": "processing"},
+        {"id": 3, "status": "failed"},
+        {"id": 4, "status": "blocked"},
+        {"id": 5, "status": "done"},
+    ]
+
+    assert [row["id"] for row in queue_rows_for_view(rows, "A traiter")] == [1, 2]
+    assert [row["id"] for row in queue_rows_for_view(rows, "Erreurs / blocages")] == [3, 4]
+
+
+def test_comparison_filter_preserves_decision_ranking() -> None:
+    rows = [
+        {
+            "annonce_id": 1,
+            "decision_robuste": "a_creuser",
+            "statut": "a_analyser",
+            "pct_scenarios_viables": 80.0,
+            "cashflow_prudent": 100.0,
+        },
+        {
+            "annonce_id": 2,
+            "decision_robuste": "interessant",
+            "statut": "shortlist",
+            "pct_scenarios_viables": 50.0,
+            "cashflow_prudent": -20.0,
+        },
+        {
+            "annonce_id": 3,
+            "decision_robuste": "interessant",
+            "statut": "archive",
+            "pct_scenarios_viables": 90.0,
+            "cashflow_prudent": 150.0,
+        },
+    ]
+
+    filtered = filter_comparison_rows(
+        rows,
+        selected_decisions=("interessant", "a_creuser"),
+        selected_statuses=("a_analyser", "shortlist"),
+        require_positive_prudent_cashflow=False,
+    )
+
+    assert [row["annonce_id"] for row in filtered] == [2, 1]
+    assert [row["rang"] for row in filtered] == [1, 2]
 
 
 def test_runtime_secrets_are_exposed_to_environment(monkeypatch) -> None:

@@ -47,15 +47,19 @@ from achat_immo.models import (
 )
 from achat_immo.storage import (
     DEFAULT_DB_PATH,
+    list_annonces,
     open_database,
 )
-from app.tabs.annonce import annonce_page
-from app.tabs.comparison import comparison_page
-from app.tabs.dashboard import dashboard_page
-from app.tabs.history import history_page
-from app.tabs.hypotheses import hypotheses_page
-from app.tabs.simulation import simulation_page
-from app.tabs.sourcing_queue import sourcing_queue_page
+from app.sections.comparison import comparison_page
+from app.sections.sourcing_queue import sourcing_queue_page
+from app.navigation import (
+    APP_PAGE_LABELS,
+    AUTOMATION_PAGE_LABEL,
+    COMPARISON_PAGE_LABEL,
+    PIPELINE_PAGE_LABEL,
+    PROPERTY_SHEET_PAGE_LABEL,
+    SOURCING_QUEUE_PAGE_LABEL,
+)
 from app.runtime_config import (
     apply_runtime_secrets_to_environment as _apply_runtime_secrets_to_environment,
     configured_database_url as _configured_database_url,
@@ -66,9 +70,8 @@ from app.runtime_checks import (
     require_current_runtime_api as _require_current_runtime_api,
     runtime_api_errors as _runtime_api_errors_for_context,
 )
-from app.sidebar import load_bundle as _load_bundle, sidebar as _sidebar
 from app.ui_helpers import (
-    PORTFOLIO_DECISION_LABEL,
+    PORTFOLIO_DECISION_LABEL as PORTFOLIO_DECISION_LABEL,
     SIMULATION_SECTION_LABELS as SIMULATION_SECTION_LABELS,
     derived_fiscalite_values as derived_fiscalite_values,
     effective_cfe_value as effective_cfe_value,
@@ -77,6 +80,9 @@ from app.ui_helpers import (
     is_advanced_field as is_advanced_field,
     is_deduced_field as is_deduced_field,
 )
+from app.views.automation import automation_page
+from app.views.pipeline import pipeline_page
+from app.views.property_sheet import property_sheet_page
 
 
 EXPECTED_GRID_API_VERSION = "multi_regime_grid_v1"
@@ -113,9 +119,9 @@ def main() -> None:
         pass
     _apply_runtime_secrets_to_environment()
         
-    st.set_page_config(page_title="Simulateur d'Achat immobilier locatif", layout="wide")
+    st.set_page_config(page_title="Investissement immobilier automatise", layout="wide")
     _require_authentication()
-    st.title("Simulateur d'Achat immobilier locatif")
+    st.title("Investissement immobilier automatise")
     _require_current_runtime_api(RUNTIME_API_CONTEXT)
 
     database_url = _configured_database_url()
@@ -125,35 +131,36 @@ def main() -> None:
     else:
         database_target = st.sidebar.text_input("Base SQLite", value=str(DEFAULT_DB_PATH))
     conn = _database(database_target, DB_CONNECTION_CACHE_VERSION)
-    rows, selected_id = _sidebar(conn)
-    annonce, hypotheses = _load_bundle(conn, selected_id)
+    rows = list_annonces(conn)
+    page = _main_navigation()
 
-    tab_dashboard, tab_queue, tab_annonce, tab_hypotheses, tab_simulation, tab_comparison, tab_history = st.tabs(
-        [
-            "Tableau de bord",
-            "Queue sourcing",
-            "Annonce",
-            "Hypotheses",
-            "Simulation",
-            PORTFOLIO_DECISION_LABEL,
-            "Historique",
-        ]
-    )
-
-    with tab_dashboard:
-        dashboard_page(conn, rows)
-    with tab_queue:
+    if page == PIPELINE_PAGE_LABEL:
+        pipeline_page(conn, rows)
+    elif page == SOURCING_QUEUE_PAGE_LABEL:
         sourcing_queue_page(conn)
-    with tab_annonce:
-        annonce_page(conn, annonce, hypotheses)
-    with tab_hypotheses:
-        hypotheses_page(conn, annonce, hypotheses)
-    with tab_simulation:
-        simulation_page(conn, annonce, hypotheses)
-    with tab_comparison:
-        comparison_page(conn, rows, annonce)
-    with tab_history:
-        history_page(conn, selected_id)
+    elif page == PROPERTY_SHEET_PAGE_LABEL:
+        property_sheet_page(conn, rows)
+    elif page == COMPARISON_PAGE_LABEL:
+        comparison_page(conn, rows)
+    elif page == AUTOMATION_PAGE_LABEL:
+        automation_page(conn, database_target=database_target)
+
+
+def _main_navigation() -> str:
+    if st.session_state.get("current_page") not in APP_PAGE_LABELS:
+        st.session_state["current_page"] = PIPELINE_PAGE_LABEL
+
+    st.sidebar.subheader("Navigation")
+    page = st.sidebar.radio(
+        "Page",
+        options=APP_PAGE_LABELS,
+        key="current_page",
+        label_visibility="collapsed",
+    )
+    selected_id = st.session_state.get("selected_annonce_id")
+    if selected_id is not None:
+        st.sidebar.caption(f"Fiche active : #{selected_id}")
+    return str(page)
 
 
 if __name__ == "__main__":

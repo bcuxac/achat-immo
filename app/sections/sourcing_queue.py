@@ -21,13 +21,21 @@ from achat_immo.storage import (
     mark_sourcing_url_skipped,
     update_sourcing_queue_item,
 )
+from app.navigation import PROPERTY_SHEET_PAGE_LABEL
 
 
 QUEUE_STATUSES = ("pending", "processing", "done", "failed", "blocked", "skipped")
+QUEUE_VIEW_FILTERS = {
+    "A traiter": ("pending", "processing"),
+    "Erreurs / blocages": ("failed", "blocked"),
+    "Ignorees": ("skipped",),
+    "Terminees": ("done",),
+    "Toutes": QUEUE_STATUSES,
+}
 
 
 def sourcing_queue_page(conn: DatabaseConnection) -> None:
-    st.subheader("Queue sourcing")
+    st.header("Queue sourcing")
     _render_enqueue_form(conn)
 
     rows = list_sourcing_queue(conn)
@@ -36,21 +44,23 @@ def sourcing_queue_page(conn: DatabaseConnection) -> None:
         return
 
     _render_status_metrics(rows)
-    selected_statuses = st.multiselect(
-        "Statuts",
-        options=QUEUE_STATUSES,
-        default=("pending", "failed", "blocked", "skipped"),
+    view = st.radio(
+        "Vue",
+        options=tuple(QUEUE_VIEW_FILTERS),
+        horizontal=True,
+        key="sourcing_queue_view",
     )
-    filtered_rows = [row for row in rows if not selected_statuses or row["status"] in selected_statuses]
+    filtered_rows = queue_rows_for_view(rows, view)
     if filtered_rows:
         st.dataframe(_queue_dataframe(filtered_rows), hide_index=True, width="stretch")
     else:
-        st.info("Aucune URL pour ce filtre.")
+        st.info("Aucune URL dans cette vue.")
+        return
 
     selected_id = st.selectbox(
-        "URL selectionnee",
-        options=[int(row["id"]) for row in rows],
-        format_func=lambda queue_id: _queue_label(rows, queue_id),
+        "URL a traiter",
+        options=[int(row["id"]) for row in filtered_rows],
+        format_func=lambda queue_id: _queue_label(filtered_rows, queue_id),
     )
     selected = get_sourcing_queue_item(conn, int(selected_id))
     if selected is None:
@@ -60,6 +70,11 @@ def sourcing_queue_page(conn: DatabaseConnection) -> None:
 
 
 def _render_enqueue_form(conn: DatabaseConnection) -> None:
+    with st.expander("Ajouter des URLs", expanded=True):
+        _enqueue_form(conn)
+
+
+def _enqueue_form(conn: DatabaseConnection) -> None:
     with st.form("enqueue_sourcing_urls"):
         urls_text = st.text_area("URLs", height=110)
         c1, c2 = st.columns(2)
@@ -92,17 +107,8 @@ def _render_status_metrics(rows: list[dict[str, Any]]) -> None:
 
 
 def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]) -> None:
-    st.subheader("Action")
-    st.write(
-        {
-            "id": item["id"],
-            "status": item["status"],
-            "source": item["source"],
-            "priority": item["priority"],
-            "url": item["source_url"],
-            "last_error": item["last_error"],
-        }
-    )
+    st.subheader("Action URL")
+    _render_selected_item_summary(item)
 
     with st.form(f"edit_queue_{item['id']}"):
         c1, c2 = st.columns(2)
@@ -114,7 +120,7 @@ def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]
             st.rerun()
 
     skip_reason = st.text_input("Raison d'ignore", value=str(item["last_error"] or "Ignore manuellement."))
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     if c1.button("Remettre en attente", width="stretch"):
         mark_sourcing_url_pending(conn, int(item["id"]))
         st.success("URL remise en attente.")
@@ -125,6 +131,14 @@ def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]
         st.rerun()
     if c3.button("Traiter maintenant", type="primary", width="stretch"):
         _process_selected_item(conn, item)
+    if c4.button(
+        "Ouvrir la fiche",
+        width="stretch",
+        disabled=item.get("annonce_id") is None,
+    ):
+        st.session_state["selected_annonce_id"] = int(item["annonce_id"])
+        st.session_state["current_page"] = PROPERTY_SHEET_PAGE_LABEL
+        st.rerun()
 
 
 def _process_selected_item(conn: DatabaseConnection, item: dict[str, Any]) -> None:
@@ -165,6 +179,24 @@ def _queue_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows)[columns]
 
 
+def queue_rows_for_view(rows: list[dict[str, Any]], view: str) -> list[dict[str, Any]]:
+    statuses = set(QUEUE_VIEW_FILTERS.get(view, QUEUE_STATUSES))
+    return [row for row in rows if str(row.get("status") or "") in statuses]
+
+
 def _queue_label(rows: list[dict[str, Any]], queue_id: int) -> str:
     row = next(row for row in rows if int(row["id"]) == queue_id)
     return f"#{row['id']} {row['status']} p{row['priority']} - {row['source_url']}"
+
+
+def _render_selected_item_summary(item: dict[str, Any]) -> None:
+    summary = {
+        "id": item["id"],
+        "status": item["status"],
+        "source": item["source"],
+        "priority": item["priority"],
+        "url": item["source_url"],
+        "annonce_id": item["annonce_id"] or "",
+        "last_error": item["last_error"],
+    }
+    st.dataframe(pd.DataFrame([summary]), hide_index=True, width="stretch")

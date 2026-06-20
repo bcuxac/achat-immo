@@ -1,4 +1,4 @@
-"""Page de simulation des scenarios d'investissement."""
+"""Section d'analyse financiere d'une fiche annonce."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ from app.ui_helpers import (
 )
 
 
-def simulation_page(
+def financial_analysis_section(
     conn: DatabaseConnection,
     annonce: AnnonceRecord | None,
     hypotheses: HypothesesAchatRecord | None,
@@ -60,13 +60,13 @@ def simulation_page(
         return
         
     if annonce.surface_m2 <= 0.0 or annonce.prix_affiche <= 0.0:
-        st.warning("Impossible d'afficher la simulation : veuillez d'abord renseigner la surface et le prix de l'annonce.")
+        st.warning("Impossible d'afficher l'analyse : renseigne d'abord la surface et le prix de l'annonce.")
         return
         
     bien, location, _ = to_domain_models(annonce, hypotheses)
     fiscalite = fiscalite_from_hypotheses(hypotheses)
 
-    st.subheader("Simulation")
+    st.subheader("Grille de simulation")
     st.caption("Les parametres peuvent bouger librement. Le moteur ne calcule qu'au clic.")
     bien_simule, location_simulee, params, scenario_base, commentaire, scenario_count, signature = _simulation_inputs(
         bien,
@@ -462,7 +462,7 @@ def _simulation_summary(bien: BienImmobilier, params: GrilleParametres, scenario
         c2.metric("Pret necessaire", f"{_format_eur(min_pret)} - {_format_eur(max_pret)}")
     c3.metric("Prix testes", len(params.prix_achats))
     c4.metric("Loyers testes", len(params.loyers_hc_mensuels))
-    c5.metric("Simulations prevues", f"{scenario_count:,}")
+    c5.metric("Scenarios prevus", f"{scenario_count:,}")
 
 
 def _as_float_tuple(values: list[float]) -> tuple[float, ...]:
