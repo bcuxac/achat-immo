@@ -97,21 +97,20 @@ les secrets Streamlit, l'application utilise cette base distante a la place du
 fichier SQLite local. Ce mode est destine au deploiement cloud.
 
 Excel devient optionnel : la discussion peut se faire directement dans
-l'application via les vues annonce, simulations, comparaison et historique.
+l'application via un workflow centre sur l'import d'URLs, le pipeline
+d'opportunites et la fiche de decision.
 
 Workflow de l'application :
 
-- `Nouvelle annonce` dans la barre laterale cree une fiche distincte dans SQLite ;
-- `Tableau de bord` donne une vue base de donnees : annonces, statuts et derniers snapshots ;
-- `Annonce` contient les donnees factuelles du bien ;
-- `Hypotheses` contient les couts d'acquisition, charges et frais de modele ;
-- `Hypotheses` propose des suggestions automatiques depuis l'annonce, applicables aux champs vides ou a toute la fiche ;
-- `Hypotheses` contient aussi la fiscalite utilisee par les simulations : LMNP reel, micro-BIC, nue reel ou micro-foncier ;
-- `Simulations` estime le nombre de scenarios puis lance au clic les grilles loyer x taux x duree x apport x vacance x gestion ;
-- les resultats de simulation sont centres sur le cash-flow mensuel de l'annee 1, le pret necessaire et une carte de decision ;
-- la decision robuste affiche mediane, P10, part viable et conditions minimales observees avant le meilleur scenario ;
-- `Comparaison` sert a comparer les meilleurs snapshots et a formaliser statut/notes ;
-- `Historique` conserve les snapshots sauvegardes pour revenir sur une analyse passee.
+- `Pipeline` montre les opportunites a traiter, leurs statuts et les actions
+  prioritaires ;
+- `Queue sourcing` sert a ajouter des URLs, surveiller leur traitement et
+  depanner manuellement les cas bloques ;
+- `Fiche annonce` regroupe tout ce qui concerne une seule annonce : synthese,
+  donnees extraites, hypotheses, analyse financiere, preuves et decision ;
+- `Comparaison` arbitre uniquement les opportunites shortlistees ou actives ;
+- `Parametres / Automatisation` explicite les secrets attendus, le workflow
+  GitHub Actions et les limites operationnelles.
 
 ## Deploiement gratuit pour deux utilisateurs
 

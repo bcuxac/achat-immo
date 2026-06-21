@@ -9,10 +9,12 @@ from types import ModuleType
 
 from app import streamlit_app as ui
 from app import runtime_config
-from app.sections.comparison import filter_comparison_rows
+from app.sections.comparison import build_comparison_rows, filter_comparison_rows
 from app.sections.sourcing_queue import queue_rows_for_view
+from app.views.property_sheet import _format_probability_pct, build_property_decision_summary
 from app.views.pipeline import filter_pipeline_items
 from achat_immo.models import ModeLocation, RegimeFiscal
+from achat_immo.storage import AnnonceRecord, HypothesesAchatRecord
 
 
 def test_field_origins_identify_deduced_and_advanced_fields() -> None:
@@ -102,8 +104,8 @@ def test_sourcing_queue_views_are_operational_groups() -> None:
         {"id": 5, "status": "done"},
     ]
 
-    assert [row["id"] for row in queue_rows_for_view(rows, "A traiter")] == [1, 2]
-    assert [row["id"] for row in queue_rows_for_view(rows, "Erreurs / blocages")] == [3, 4]
+    assert [row["id"] for row in queue_rows_for_view(rows, "URLs a analyser")] == [1, 2]
+    assert [row["id"] for row in queue_rows_for_view(rows, "A corriger")] == [3, 4]
 
 
 def test_comparison_filter_preserves_decision_ranking() -> None:
@@ -140,6 +142,130 @@ def test_comparison_filter_preserves_decision_ranking() -> None:
 
     assert [row["annonce_id"] for row in filtered] == [2, 1]
     assert [row["rang"] for row in filtered] == [1, 2]
+
+
+def test_comparison_rows_only_include_shortlisted_opportunities() -> None:
+    runs = [
+        {"id": 10, "annonce_id": 1, "ville": "Grenoble", "quartier": "Centre"},
+        {"id": 11, "annonce_id": 2, "ville": "Grenoble", "quartier": "Gare"},
+    ]
+    property_rows = [
+        {"id": 1, "statut": "a_analyser"},
+        {"id": 2, "statut": "shortlist"},
+    ]
+    result = {
+        "cashflow_mensuel_apres_impot": 50.0,
+        "vacance_mois": 1.0,
+        "gestion_agence": False,
+        "prix_achat": 100_000.0,
+        "loyer_hc_mensuel": 700.0,
+        "apport": 15_000.0,
+        "duree_annees": 20,
+        "taux_credit": 3.5,
+        "tri_annuel_pct": 6.0,
+        "score": 80.0,
+    }
+
+    rows = build_comparison_rows(runs, property_rows, {10: [result], 11: [result]})
+
+    assert [row["annonce_id"] for row in rows] == [2]
+
+
+def test_property_decision_summary_starts_with_missing_decision_inputs() -> None:
+    annonce = AnnonceRecord(ville="Grenoble", surface_m2=0.0, prix_affiche=100_000.0, statut="a_analyser")
+    hypotheses = HypothesesAchatRecord(loyer_hc_mensuel=0.0, taxe_fonciere=0.0)
+
+    summary = build_property_decision_summary(annonce, hypotheses, [], [])
+
+    assert summary.verdict == "Verifier"
+    assert "surface" in summary.reason
+    assert "loyer" in summary.reason
+
+
+def test_property_decision_summary_uses_risk_signals_before_price() -> None:
+    hypotheses = HypothesesAchatRecord(loyer_hc_mensuel=700.0, taxe_fonciere=900.0)
+    dpe_g = AnnonceRecord(
+        ville="Grenoble",
+        surface_m2=40.0,
+        prix_affiche=100_000.0,
+        dpe="G",
+        statut="a_analyser",
+        prix_cible_recommande=80_000.0,
+    )
+
+    dpe_summary = build_property_decision_summary(dpe_g, hypotheses, [], [])
+
+    assert dpe_summary.verdict == "Ecarter"
+    assert "DPE G" in dpe_summary.reason
+
+    with_red_flags = AnnonceRecord(
+        ville="Grenoble",
+        surface_m2=40.0,
+        prix_affiche=100_000.0,
+        dpe="D",
+        statut="a_analyser",
+        prix_cible_recommande=80_000.0,
+    )
+    red_flag_summary = build_property_decision_summary(
+        with_red_flags,
+        hypotheses,
+        [{"red_flags": "copro fragile, travaux lourds"}],
+        [],
+    )
+
+    assert red_flag_summary.verdict == "Verifier"
+    assert "copro fragile" in red_flag_summary.reason
+
+
+def test_property_decision_summary_normalizes_cashflow_probability_ratio() -> None:
+    hypotheses = HypothesesAchatRecord(loyer_hc_mensuel=700.0, taxe_fonciere=900.0)
+
+    healthy_probability = AnnonceRecord(
+        ville="Grenoble",
+        surface_m2=40.0,
+        prix_affiche=100_000.0,
+        dpe="D",
+        statut="a_analyser",
+        tri_p50=6.0,
+        cashflow_p50=40.0,
+        probabilite_cashflow_positif=0.62,
+        prix_cible_recommande=100_000.0,
+    )
+
+    healthy_summary = build_property_decision_summary(healthy_probability, hypotheses, [], [])
+
+    assert _format_probability_pct(0.62) == "62.0 %"
+    assert _format_probability_pct(62.0) == "62.0 %"
+    assert healthy_summary.verdict == "Decider"
+    assert "probabilite" not in healthy_summary.reason.lower()
+
+    low_probability = AnnonceRecord(
+        ville="Grenoble",
+        surface_m2=40.0,
+        prix_affiche=100_000.0,
+        dpe="D",
+        statut="a_analyser",
+        tri_p50=6.0,
+        cashflow_p50=40.0,
+        probabilite_cashflow_positif=0.20,
+        prix_cible_recommande=100_000.0,
+    )
+
+    low_summary = build_property_decision_summary(low_probability, hypotheses, [], [])
+
+    assert low_summary.verdict == "Negocier"
+    assert "20 %" in low_summary.reason
+
+
+def test_decision_ui_avoids_indirect_pipeline_and_fake_workflow_language() -> None:
+    pipeline_source = Path(ui.PROJECT_ROOT / "app" / "views" / "pipeline.py").read_text(encoding="utf-8")
+    sourcing_source = Path(ui.PROJECT_ROOT / "app" / "sections" / "sourcing_queue.py").read_text(encoding="utf-8")
+    automation_source = Path(ui.PROJECT_ROOT / "app" / "views" / "automation.py").read_text(encoding="utf-8")
+
+    assert "Actionner une fiche" not in pipeline_source
+    assert "Ouvrir cette fiche" in pipeline_source
+    assert 'st.button("Depanner maintenant", type="primary"' not in sourcing_source
+    assert "Workflow present dans le code" in automation_source
 
 
 def test_runtime_secrets_are_exposed_to_environment(monkeypatch) -> None:

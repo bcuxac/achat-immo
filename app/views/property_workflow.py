@@ -38,7 +38,7 @@ def property_workflow_actions(
         _rerun_financial_analysis(conn, annonce, hypotheses, targets)
 
     if queue_col.button(
-        "Renvoyer l'URL en queue sourcing",
+        "Renvoyer l'URL a analyser",
         width="stretch",
         key=f"enqueue_source_url_{annonce.id}",
     ):
@@ -92,5 +92,5 @@ def _enqueue_current_url(conn: DatabaseConnection, annonce: AnnonceRecord) -> No
         return
 
     st.session_state["current_page"] = SOURCING_QUEUE_PAGE_LABEL
-    st.success(f"URL ajoutee a la queue sourcing. Queue #{queue_id}.")
+    st.success(f"URL ajoutee aux URLs a analyser. Reference #{queue_id}.")
     st.rerun()

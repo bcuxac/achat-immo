@@ -57,26 +57,28 @@ OPPORTUNITY_COLUMNS = [
 def pipeline_page(conn: DatabaseConnection, rows: list[dict[str, Any]]) -> None:
     """Affiche le pipeline d'opportunites et les prochaines actions."""
 
-    st.header("Pipeline")
+    st.header("A traiter maintenant")
     extraction_runs = list_extraction_runs(conn)
     analysis_runs = list_analysis_runs(conn)
     sourcing_queue = list_sourcing_queue(conn)
     sourcing_runs = list_sourcing_runs(conn, limit=10)
     snapshot = build_cockpit_snapshot(rows, extraction_runs, analysis_runs, sourcing_queue, sourcing_runs)
 
-    _render_top_metrics(snapshot.totals)
-    _render_funnel(snapshot.funnel_counts)
-    _render_priority_table(snapshot.priority_items)
-    _render_opportunity_table(rows)
+    _render_attention_metrics(snapshot.totals, snapshot.funnel_counts)
+    _render_priority_actions(snapshot.priority_items)
+    with st.expander("Voir l'entonnoir complet", expanded=False):
+        _render_funnel(snapshot.funnel_counts)
+    with st.expander("Voir toutes les opportunites", expanded=False):
+        _render_opportunity_table(rows)
 
 
-def _render_top_metrics(totals: dict[str, int]) -> None:
+def _render_attention_metrics(totals: dict[str, int], funnel_counts: dict[str, int]) -> None:
     columns = st.columns(5)
-    columns[0].metric("Annonces", totals.get("annonces", 0))
-    columns[1].metric("Actives", totals.get("actives", 0))
-    columns[2].metric("Shortlist", totals.get("shortlist", 0))
-    columns[3].metric("Queue pending", totals.get("queue_pending", 0))
-    columns[4].metric("Queue bloquee", totals.get("queue_blocked", 0))
+    columns[0].metric("A verifier", funnel_counts.get("a_verifier", 0))
+    columns[1].metric("A completer", funnel_counts.get("donnees_insuffisantes", 0))
+    columns[2].metric("Sources bloquees", funnel_counts.get("extraction_bloquee", 0))
+    columns[3].metric("Shortlist", totals.get("shortlist", 0))
+    columns[4].metric("URLs en attente", totals.get("queue_pending", 0))
 
 
 def _render_funnel(funnel_counts: dict[str, int]) -> None:
@@ -88,8 +90,8 @@ def _render_funnel(funnel_counts: dict[str, int]) -> None:
             column.metric(FUNNEL_LABELS.get(stage, stage), funnel_counts.get(stage, 0))
 
 
-def _render_priority_table(priority_items: list[dict[str, Any]]) -> None:
-    st.subheader("Actions prioritaires")
+def _render_priority_actions(priority_items: list[dict[str, Any]]) -> None:
+    st.subheader("Prochaines decisions")
     if not priority_items:
         st.info("Aucune action prioritaire.")
         return
@@ -116,10 +118,40 @@ def _render_priority_table(priority_items: list[dict[str, Any]]) -> None:
         st.info("Aucune annonce pour ces filtres.")
         return
 
-    _render_open_priority_control(filtered_items)
-    df = priority_dataframe(filtered_items)
+    for item in filtered_items[:6]:
+        _render_priority_card(item)
+    with st.expander("Table detaillee", expanded=False):
+        _render_priority_table(filtered_items)
+
+
+def _render_priority_table(items: list[dict[str, Any]]) -> None:
+    df = priority_dataframe(items)
     visible_columns = [column for column in PRIORITY_COLUMNS if column in df.columns]
     st.dataframe(df[visible_columns].head(30), hide_index=True, width="stretch")
+
+
+def _render_priority_card(item: dict[str, Any]) -> None:
+    with st.container(border=True):
+        location = " - ".join(
+            value for value in (str(item.get("ville") or ""), str(item.get("quartier") or "")) if value
+        )
+        title = f"#{item.get('id')} {location or 'Adresse a verifier'}"
+        st.markdown(f"**{title}**")
+        c1, c2, c3 = st.columns([1.2, 1.4, 2.4])
+        c1.metric("Etape", str(item.get("etape") or "A verifier"))
+        c2.metric("TRI median", _format_optional_pct(item.get("tri_p50")))
+        c3.write(str(item.get("signal") or item.get("action") or "Verifier la fiche."))
+        st.caption(str(item.get("action") or "Ouvrir la fiche pour decider."))
+        if st.button("Ouvrir cette fiche", type="primary", key=f"pipeline_open_{item.get('id')}"):
+            st.session_state["selected_annonce_id"] = int(item["id"])
+            st.session_state["current_page"] = PROPERTY_SHEET_PAGE_LABEL
+            st.rerun()
+
+
+def _format_optional_pct(value: Any) -> str:
+    if value is None or value == "":
+        return "n/a"
+    return f"{float(value):,.1f} %"
 
 
 def _render_opportunity_table(rows: list[dict[str, Any]]) -> None:
@@ -164,31 +196,7 @@ def priority_dataframe(items: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-def _render_open_priority_control(items: list[dict[str, Any]]) -> None:
-    ids = [int(item["id"]) for item in items if item.get("id") is not None]
-    if not ids:
-        return
-
-    selected_id = st.selectbox(
-        "Actionner une fiche",
-        options=ids,
-        format_func=lambda annonce_id: _priority_label(items, annonce_id),
-        key="pipeline_priority_annonce_id",
-    )
-    if st.button("Ouvrir la fiche selectionnee", type="primary"):
-        st.session_state["selected_annonce_id"] = int(selected_id)
-        st.session_state["current_page"] = PROPERTY_SHEET_PAGE_LABEL
-        st.rerun()
-
-
 def _stage_filter_options(items: list[dict[str, Any]]) -> dict[str, str]:
     stages = [stage for stage in FUNNEL_ORDER if any(item.get("stage") == stage for item in items)]
     unknown_stages = sorted({str(item.get("stage") or "") for item in items} - set(stages) - {""})
     return {stage: FUNNEL_LABELS.get(stage, stage) for stage in [*stages, *unknown_stages]}
-
-
-def _priority_label(items: list[dict[str, Any]], annonce_id: int) -> str:
-    item = next(item for item in items if int(item["id"]) == int(annonce_id))
-    location = " - ".join(value for value in (str(item.get("ville") or ""), str(item.get("quartier") or "")) if value)
-    action = str(item.get("action") or "Verifier")
-    return f"#{annonce_id} {location} - {action}"

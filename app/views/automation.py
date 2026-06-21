@@ -15,6 +15,7 @@ from app.runtime_config import configured_database_url, configured_gemini_api_ke
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCING_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "sourcing.yml"
+GITHUB_ACTIONS_URL = "https://github.com/bcuxac/achat-immo/actions/workflows/sourcing.yml"
 DEFAULT_ALLOWED_DOMAINS = "jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr"
 
 
@@ -48,23 +49,27 @@ def _render_runtime_status(database_target: str) -> None:
 
 
 def _render_github_actions_status(conn: DatabaseConnection) -> None:
-    st.subheader("GitHub Actions")
+    st.subheader("Automatisation sourcing")
     queue_rows = list_sourcing_queue(conn)
     run_rows = list_sourcing_runs(conn, limit=10)
     pending_count = sum(1 for row in queue_rows if row.get("status") == "pending")
     blocked_count = sum(1 for row in queue_rows if row.get("status") == "blocked")
     failed_count = sum(1 for row in queue_rows if row.get("status") == "failed")
+    latest_run = run_rows[0] if run_rows else {}
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Workflow", "present" if SOURCING_WORKFLOW_PATH.exists() else "absent")
-    c2.metric("URLs pending", pending_count)
-    c3.metric("URLs bloquees", blocked_count)
-    c4.metric("URLs en erreur", failed_count)
+    c1.metric("Workflow present dans le code", "oui" if SOURCING_WORKFLOW_PATH.exists() else "non")
+    c2.metric("URLs a analyser", pending_count)
+    c3.metric("A corriger", failed_count + blocked_count)
+    c4.metric("Dernier traitement", str(latest_run.get("status") or "absent"))
+    st.caption("Execution planifiee : tous les jours vers 07:17 heure de Paris, plus declenchement manuel GitHub.")
+    st.link_button("Ouvrir GitHub Actions", GITHUB_ACTIONS_URL)
 
     if run_rows:
-        st.dataframe(pd.DataFrame(run_rows).head(10), hide_index=True, width="stretch")
+        with st.expander("Voir les derniers traitements", expanded=False):
+            st.dataframe(pd.DataFrame(run_rows).head(10), hide_index=True, width="stretch")
     else:
-        st.info("Aucun run de sourcing trace.")
+        st.info("Aucun traitement automatique trace.")
 
 
 def _render_sourcing_policy() -> None:

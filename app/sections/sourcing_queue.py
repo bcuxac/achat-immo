@@ -1,4 +1,4 @@
-"""Pilotage Streamlit de la queue de sourcing."""
+"""Page d'import et de suivi des URLs a sourcer."""
 
 from __future__ import annotations
 
@@ -25,17 +25,25 @@ from app.navigation import PROPERTY_SHEET_PAGE_LABEL
 
 
 QUEUE_STATUSES = ("pending", "processing", "done", "failed", "blocked", "skipped")
+QUEUE_STATUS_LABELS = {
+    "pending": "A analyser",
+    "processing": "En cours",
+    "done": "Annonce creee",
+    "failed": "A corriger",
+    "blocked": "Source bloquee",
+    "skipped": "Ignoree",
+}
 QUEUE_VIEW_FILTERS = {
-    "A traiter": ("pending", "processing"),
-    "Erreurs / blocages": ("failed", "blocked"),
+    "URLs a analyser": ("pending", "processing"),
+    "A corriger": ("failed", "blocked"),
+    "Annonces creees": ("done",),
     "Ignorees": ("skipped",),
-    "Terminees": ("done",),
     "Toutes": QUEUE_STATUSES,
 }
 
 
 def sourcing_queue_page(conn: DatabaseConnection) -> None:
-    st.header("Queue sourcing")
+    st.header("Importer des URLs")
     _render_enqueue_form(conn)
 
     rows = list_sourcing_queue(conn)
@@ -58,7 +66,7 @@ def sourcing_queue_page(conn: DatabaseConnection) -> None:
         return
 
     selected_id = st.selectbox(
-        "URL a traiter",
+        "URL selectionnee",
         options=[int(row["id"]) for row in filtered_rows],
         format_func=lambda queue_id: _queue_label(filtered_rows, queue_id),
     )
@@ -77,10 +85,11 @@ def _render_enqueue_form(conn: DatabaseConnection) -> None:
 def _enqueue_form(conn: DatabaseConnection) -> None:
     with st.form("enqueue_sourcing_urls"):
         urls_text = st.text_area("URLs", height=110)
-        c1, c2 = st.columns(2)
-        source = c1.text_input("Source", value="manual")
-        priority = c2.number_input("Priorite", value=0, step=1)
-        submitted = st.form_submit_button("Ajouter a la queue")
+        with st.expander("Options avancees", expanded=False):
+            c1, c2 = st.columns(2)
+            source = c1.text_input("Source", value="manual")
+            priority = c2.number_input("Priorite", value=0, step=1)
+        submitted = st.form_submit_button("Ajouter aux URLs a analyser")
     if not submitted:
         return
 
@@ -101,23 +110,15 @@ def _enqueue_form(conn: DatabaseConnection) -> None:
 
 def _render_status_metrics(rows: list[dict[str, Any]]) -> None:
     counts = Counter(str(row["status"]) for row in rows)
-    cols = st.columns(len(QUEUE_STATUSES))
-    for col, status in zip(cols, QUEUE_STATUSES, strict=True):
-        col.metric(status, counts.get(status, 0))
+    visible_statuses = ("pending", "processing", "failed", "blocked", "done")
+    cols = st.columns(len(visible_statuses))
+    for col, status in zip(cols, visible_statuses, strict=True):
+        col.metric(QUEUE_STATUS_LABELS[status], counts.get(status, 0))
 
 
 def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]) -> None:
     st.subheader("Action URL")
     _render_selected_item_summary(item)
-
-    with st.form(f"edit_queue_{item['id']}"):
-        c1, c2 = st.columns(2)
-        source = c1.text_input("Source", value=str(item["source"]))
-        priority = c2.number_input("Priorite", value=int(item["priority"]), step=1)
-        if st.form_submit_button("Mettre a jour"):
-            update_sourcing_queue_item(conn, int(item["id"]), source=source.strip() or "manual", priority=int(priority))
-            st.success("Queue mise a jour.")
-            st.rerun()
 
     skip_reason = st.text_input("Raison d'ignore", value=str(item["last_error"] or "Ignore manuellement."))
     c1, c2, c3, c4 = st.columns(4)
@@ -129,8 +130,10 @@ def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]
         mark_sourcing_url_skipped(conn, int(item["id"]), skip_reason.strip() or "Ignore manuellement.")
         st.success("URL ignoree.")
         st.rerun()
-    if c3.button("Traiter maintenant", type="primary", width="stretch"):
-        _process_selected_item(conn, item)
+    with c3:
+        if st.button("Depanner maintenant", width="stretch"):
+            _process_selected_item(conn, item)
+        st.caption("Action manuelle exceptionnelle. Le traitement normal passe par GitHub Actions.")
     if c4.button(
         "Ouvrir la fiche",
         width="stretch",
@@ -139,6 +142,22 @@ def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]
         st.session_state["selected_annonce_id"] = int(item["annonce_id"])
         st.session_state["current_page"] = PROPERTY_SHEET_PAGE_LABEL
         st.rerun()
+
+    with st.expander("Details techniques", expanded=False):
+        with st.form(f"edit_queue_{item['id']}"):
+            c1, c2 = st.columns(2)
+            source = c1.text_input("Source", value=str(item["source"]))
+            priority = c2.number_input("Priorite", value=int(item["priority"]), step=1)
+            if st.form_submit_button("Mettre a jour"):
+                update_sourcing_queue_item(
+                    conn,
+                    int(item["id"]),
+                    source=source.strip() or "manual",
+                    priority=int(priority),
+                )
+                st.success("URL mise a jour.")
+                st.rerun()
+        _render_technical_summary(item)
 
 
 def _process_selected_item(conn: DatabaseConnection, item: dict[str, Any]) -> None:
@@ -165,18 +184,18 @@ def _process_selected_item(conn: DatabaseConnection, item: dict[str, Any]) -> No
 
 
 def _queue_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
-    columns = [
-        "id",
-        "status",
-        "priority",
-        "source",
-        "source_url",
-        "attempts",
-        "annonce_id",
-        "last_error",
-        "last_processed_at",
-    ]
-    return pd.DataFrame(rows)[columns]
+    return pd.DataFrame(
+        [
+            {
+                "etat": QUEUE_STATUS_LABELS.get(str(row.get("status") or ""), str(row.get("status") or "")),
+                "url": row.get("source_url") or "",
+                "annonce": f"#{row['annonce_id']}" if row.get("annonce_id") else "",
+                "probleme": row.get("last_error") or "",
+                "dernier_traitement": row.get("last_processed_at") or "",
+            }
+            for row in rows
+        ]
+    )
 
 
 def queue_rows_for_view(rows: list[dict[str, Any]], view: str) -> list[dict[str, Any]]:
@@ -186,17 +205,28 @@ def queue_rows_for_view(rows: list[dict[str, Any]], view: str) -> list[dict[str,
 
 def _queue_label(rows: list[dict[str, Any]], queue_id: int) -> str:
     row = next(row for row in rows if int(row["id"]) == queue_id)
-    return f"#{row['id']} {row['status']} p{row['priority']} - {row['source_url']}"
+    status = QUEUE_STATUS_LABELS.get(str(row["status"]), str(row["status"]))
+    return f"#{row['id']} {status} - {row['source_url']}"
 
 
 def _render_selected_item_summary(item: dict[str, Any]) -> None:
     summary = {
+        "etat": QUEUE_STATUS_LABELS.get(str(item["status"]), str(item["status"])),
+        "url": item["source_url"],
+        "annonce": f"#{item['annonce_id']}" if item.get("annonce_id") else "",
+        "probleme": item["last_error"],
+    }
+    st.dataframe(pd.DataFrame([summary]), hide_index=True, width="stretch")
+
+
+def _render_technical_summary(item: dict[str, Any]) -> None:
+    technical = {
         "id": item["id"],
         "status": item["status"],
         "source": item["source"],
         "priority": item["priority"],
-        "url": item["source_url"],
+        "attempts": item["attempts"],
         "annonce_id": item["annonce_id"] or "",
-        "last_error": item["last_error"],
+        "last_processed_at": item["last_processed_at"],
     }
-    st.dataframe(pd.DataFrame([summary]), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame([technical]), hide_index=True, width="stretch")

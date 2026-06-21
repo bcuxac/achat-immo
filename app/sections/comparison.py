@@ -15,6 +15,7 @@ from app.ui_helpers import PORTFOLIO_DECISION_LABEL
 
 
 TERMINAL_STATUSES = {"archive", "rejete"}
+COMPARABLE_STATUSES = {"shortlist", "favori", "a_visiter", "a_negocier", "contacte", "offre_faite"}
 DECISION_ORDER = {
     "interessant": 0,
     "a_creuser": 1,
@@ -46,7 +47,7 @@ def comparison_page(conn: DatabaseConnection, rows: list[dict[str, Any]]) -> Non
     results_by_run = {int(run["id"]): get_simulation_results(conn, int(run["id"])) for run in runs}
     comparison_rows = build_comparison_rows(runs, rows, results_by_run)
     if not comparison_rows:
-        st.info("Sauvegarde un snapshot depuis Analyse financiere pour comparer les annonces.")
+        st.info("Passe une annonce en shortlist puis sauvegarde un snapshot financier pour arbitrer.")
         _render_missing_snapshot_table(rows, comparison_rows)
         return
 
@@ -88,6 +89,9 @@ def build_comparison_rows(
         best = dict(results[0])
         robustesse = analyser_grille(results)
         annonce_id = int(run["annonce_id"])
+        statut = status_by_annonce.get(annonce_id, "")
+        if statut not in COMPARABLE_STATUSES:
+            continue
         decision_rank = DECISION_ORDER.get(robustesse.decision, 99)
         best.update(
             {
@@ -95,7 +99,7 @@ def build_comparison_rows(
                 "ville": run.get("ville") or "",
                 "quartier": run.get("quartier") or "",
                 "run_id": run_id,
-                "statut": status_by_annonce.get(annonce_id, ""),
+                "statut": statut,
                 "decision_robuste": robustesse.decision,
                 "rang_decision": decision_rank,
                 "meilleure_strategie": " / ".join(
@@ -211,12 +215,12 @@ def _render_missing_snapshot_table(
         for row in property_rows
         if row.get("id") is not None
         and int(row["id"]) not in compared_ids
-        and str(row.get("statut") or "") not in TERMINAL_STATUSES
+        and str(row.get("statut") or "") in COMPARABLE_STATUSES
     ]
     if not missing_rows:
         return
 
-    with st.expander("Annonces actives sans snapshot", expanded=False):
+    with st.expander("Opportunites shortlistees sans snapshot", expanded=False):
         df = pd.DataFrame(missing_rows)
         columns = [column for column in ("id", "statut", "ville", "quartier", "prix_affiche") if column in df.columns]
         st.dataframe(df[columns], hide_index=True, width="stretch")
