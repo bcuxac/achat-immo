@@ -25,6 +25,8 @@ affaiblir la qualite des decisions financieres.
 - [x] Quota par source et par run pour limiter les chargements navigateur.
 - [x] Resume persistant des runs de sourcing consultable dans Streamlit.
 - [x] Workflow GitHub Actions planifie et declenchable manuellement.
+- [x] Import idempotent des alertes Jinka depuis CSV, texte, EML, MBOX ou IMAP.
+- [x] Canonicalisation des liens Jinka pour supprimer les identifiants d'alerte et de campagne.
 - [x] Cockpit Streamlit minimal pour consulter les nouveaux runs.
 - [x] Funnel decisionnel et priorites d'annonces dans Streamlit.
 - [x] Preuves d'extraction et d'analyse mises en avant pour l'annonce active.
@@ -65,6 +67,8 @@ Objectif : alimenter le pipeline sans construire un scraper fragile comme point
 unique de defaillance.
 
 - Commencer par une file d'URLs, alertes mail ou exports simples.
+- Utiliser les alertes Jinka comme canal de decouverte et reserver Playwright a
+  l'extraction des fiches deja identifiees.
 - Ajouter un prefiltre deterministe avant tout appel LLM.
 - Marquer explicitement les blocages anti-bot et consent walls.
 - Appliquer des quotas par source et par run.
@@ -77,7 +81,11 @@ Configuration GitHub Actions recommandee :
 - Secret `DATABASE_URL` recommande pour persister les runs hors du runner
   GitHub. Sans ce secret, SQLite reste possible mais ephemeral dans CI.
 - Variable optionnelle `SOURCING_LIMIT`, par defaut `20`.
-- Variable optionnelle `SOURCING_SOURCE_LIMIT`, par defaut `3`.
+- Secrets optionnels `SOURCING_IMAP_HOST`, `SOURCING_IMAP_USERNAME` et
+  `SOURCING_IMAP_PASSWORD` pour alimenter automatiquement la queue.
+- Variables optionnelles `SOURCING_IMAP_PORT`, `SOURCING_IMAP_MAILBOX`,
+  `SOURCING_IMAP_SENDER` et `SOURCING_IMAP_LOOKBACK_DAYS`.
+- Variable optionnelle `SOURCING_SOURCE_LIMIT`, par defaut `20`.
 - Variable optionnelle `SOURCING_ALLOWED_DOMAINS`, par defaut
   `jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr`.
 

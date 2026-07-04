@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -68,7 +69,20 @@ def normalize_source_url(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return value.rstrip("/")
     path = parsed.path.rstrip("/")
-    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+    query = parsed.query
+
+    # Une annonce Jinka est identifiee par son chemin. Les parametres de
+    # partage (alert_id, utm_*, from) varient selon le canal et creeraient
+    # artificiellement plusieurs elements de queue pour le meme bien.
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"jinka.fr", "www.jinka.fr"} and re.fullmatch(r"/ad/[^/]+", path):
+        scheme = "https"
+        netloc = "www.jinka.fr"
+        query = ""
+
+    return urlunsplit((scheme, netloc, path, query, ""))
 
 
 def open_database(db_path: str | Path | None = DEFAULT_DB_PATH) -> DatabaseConnection:

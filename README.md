@@ -148,6 +148,32 @@ Les baremes fiscaux et plafonds legaux ne sont pas des preferences utilisateur :
 ils restent versionnes dans le code et testes separement. L'inventaire des
 valeurs encore a traiter est maintenu dans `docs/configuration_audit.md`.
 
+### Acquisition des annonces Jinka
+
+L'acquisition est separee en deux etapes : les alertes Jinka decouvrent les
+URLs, puis le pipeline existant charge et extrait uniquement ces fiches. Les
+parametres `alert_id`, `utm_*` et `from` sont retires de l'identite d'une fiche
+afin qu'une meme annonce ne soit jamais ajoutee plusieurs fois.
+
+Pour charger un historique initial, exporter les messages au format EML/MBOX,
+ou fournir un CSV/TXT contenant les liens, puis lancer :
+
+```bash
+uv run python scripts/ingest_source_archive.py chemin/vers/export.mbox
+```
+
+Le script accepte aussi un repertoire d'EML et les exports MBOX d'Apple Mail.
+Il ne demande pas de recopier les caracteristiques des biens : seule l'URL
+Jinka est necessaire.
+
+Le workflow `Sourcing immobilier` s'execute a 05:17 et 17:17 UTC. Il peut lire
+une boite dediee en IMAP, sans marquer les messages comme lus, avec les secrets
+GitHub `SOURCING_IMAP_HOST`, `SOURCING_IMAP_USERNAME` et
+`SOURCING_IMAP_PASSWORD`. Les variables facultatives sont
+`SOURCING_IMAP_PORT` (993), `SOURCING_IMAP_MAILBOX` (INBOX),
+`SOURCING_IMAP_SENDER` et `SOURCING_IMAP_LOOKBACK_DAYS` (2). Pour le chargement
+initial, declencher manuellement le workflow avec 90 jours de recul.
+
 ## Deploiement gratuit pour deux utilisateurs
 
 Architecture cible :

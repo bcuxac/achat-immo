@@ -10,13 +10,17 @@ on:
       source_limit:
         description: "Nombre maximal d'URLs a charger par source"
         required: false
-        default: "3"
+        default: "20"
+      mail_lookback_days:
+        description: "Nombre de jours d'alertes e-mail a importer (90 pour le chargement initial)"
+        required: false
+        default: "2"
       allowed_domains:
         description: "Domaines autorises, separes par des virgules"
         required: false
         default: "jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr"
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "17 5,17 * * *"
 
 concurrency:
   group: sourcing-immobilier
@@ -30,9 +34,16 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SOURCING_IMAP_HOST: ${{ secrets.SOURCING_IMAP_HOST }}
+      SOURCING_IMAP_PORT: ${{ vars.SOURCING_IMAP_PORT || '993' }}
+      SOURCING_IMAP_USERNAME: ${{ secrets.SOURCING_IMAP_USERNAME }}
+      SOURCING_IMAP_PASSWORD: ${{ secrets.SOURCING_IMAP_PASSWORD }}
+      SOURCING_IMAP_MAILBOX: ${{ vars.SOURCING_IMAP_MAILBOX || 'INBOX' }}
+      SOURCING_IMAP_SENDER: ${{ vars.SOURCING_IMAP_SENDER }}
+      SOURCING_IMAP_LOOKBACK_DAYS: ${{ github.event.inputs.mail_lookback_days || vars.SOURCING_IMAP_LOOKBACK_DAYS || '2' }}
       PYTHONPATH: src
       SOURCING_LIMIT: ${{ github.event.inputs.limit || vars.SOURCING_LIMIT || '20' }}
-      SOURCING_SOURCE_LIMIT: ${{ github.event.inputs.source_limit || vars.SOURCING_SOURCE_LIMIT || '3' }}
+      SOURCING_SOURCE_LIMIT: ${{ github.event.inputs.source_limit || vars.SOURCING_SOURCE_LIMIT || '20' }}
       SOURCING_ALLOWED_DOMAINS: ${{ github.event.inputs.allowed_domains || vars.SOURCING_ALLOWED_DOMAINS || 'jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr' }}
 
     steps:
@@ -54,6 +65,10 @@ jobs:
 
       - name: Installer Chromium Playwright
         run: uv run playwright install --with-deps chromium
+
+      - name: Importer les alertes Jinka depuis IMAP
+        if: ${{ env.SOURCING_IMAP_HOST != '' && env.SOURCING_IMAP_USERNAME != '' && env.SOURCING_IMAP_PASSWORD != '' }}
+        run: uv run python scripts/ingest_imap_alerts.py --lookback-days "${SOURCING_IMAP_LOOKBACK_DAYS}"
 
       - name: Verifier les secrets
         run: |

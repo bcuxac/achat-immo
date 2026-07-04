@@ -333,6 +333,12 @@ def test_sourcing_queue_dedoublonne_et_transitionne(tmp_path: Path) -> None:
 
     assert first_id == second_id
     assert normalize_source_url("HTTPS://Example.test/a/#tracking") == "https://example.test/a"
+    assert (
+        normalize_source_url(
+            "https://jinka.fr/ad/53fb9eba?alert_id=secret&utm_source=jinka_app#from-share"
+        )
+        == "https://www.jinka.fr/ad/53fb9eba"
+    )
     assert pending[0]["source_url"] == "https://example.test/a"
     assert pending[0]["priority"] == 5
     assert find_annonce_id_by_url(conn, "https://example.test/a/") == annonce_id
