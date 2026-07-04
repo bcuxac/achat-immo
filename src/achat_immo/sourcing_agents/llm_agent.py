@@ -10,7 +10,7 @@ from shutil import which
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 
-from achat_immo.deal_scoring.candidate_property import CandidateProperty
+from achat_immo.sourcing_agents.models import CandidateProperty
 
 
 CHROMIUM_CANDIDATES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")

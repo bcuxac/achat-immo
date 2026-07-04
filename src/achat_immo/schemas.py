@@ -34,7 +34,7 @@ class AnnonceRecordSchema(BoundaryModel):
     prix_negocie: float | None = Field(default=None, gt=0)
     dpe: str = ""
     description: str = ""
-    statut: str = "a_analyser"
+    statut: str = "a_verifier"
     notes: str = ""
     # Metrics
     tri_p50: float | None = None

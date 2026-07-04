@@ -1,5 +1,11 @@
 # Plan d'implementation Phase 2
 
+> Ce document decrit le durcissement du pipeline existant. La direction
+> analytique courante est completee par l'ADR 002 : une cartographie de
+> viabilite hors ligne doit desormais preceder le Monte Carlo propre a chaque
+> annonce. Le sourcing approfondi n'a vocation a traiter que les opportunites
+> preselectionnees par cette carte.
+
 Ce plan transforme l'aspirateur d'annonces en pipeline automatisable sans
 affaiblir la qualite des decisions financieres.
 

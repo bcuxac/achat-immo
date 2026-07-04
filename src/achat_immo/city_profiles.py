@@ -218,6 +218,15 @@ def supported_city_labels() -> tuple[str, ...]:
     return tuple(profile.label for profile in CITY_PROFILES.values())
 
 
+def legal_rent_caps_per_m2(ville: str) -> tuple[float, ...]:
+    """Retourne les plafonds numeriques distincts connus pour une ville."""
+
+    profile = profile_for_city(ville)
+    if profile is None:
+        return ()
+    return tuple(sorted(set(profile.loyers_reference_majores_m2.values())))
+
+
 def profile_for_city(ville: str) -> CityProfile | None:
     code = CITY_ALIASES.get(_normalize(ville))
     if code is None:

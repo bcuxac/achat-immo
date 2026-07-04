@@ -10,7 +10,6 @@ from achat_immo.models import Fiscalite, ModeLocation, RegimeFiscal
 
 STATUTS = [
     "nouveau",
-    "a_analyser",
     "diagnostic_incomplet",
     "donnees_insuffisantes",
     "hors_criteres",

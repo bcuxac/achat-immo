@@ -1,17 +1,37 @@
-# ROADMAP - Évolutions Futures du Projet
+# Roadmap
 
-Les moteurs de calcul actuels (nom propre, LMNP/Nue/Micro) sont complets pour la recherche de rentabilité classique. Les éléments ci-dessous sont gardés en réserve car ils relèvent de stratégies plus complexes ou d'automatisations ultérieures.
+L'objectif prioritaire est d'identifier automatiquement, dans un grand volume
+d'annonces, les biens ayant un potentiel eleve de rentabilite ajustee du risque.
 
-- [ ] **Modélisation des Sociétés (SCI à l'IS, SAS)** :
-  - Intégration du taux d'Impôt sur les Sociétés (IS).
-  - Amortissement comptable de l'intégralité du bien (nu comme meublé).
-  - Calcul de la plus-value professionnelle à la revente (réintégration totale des amortissements, taxation à l'IS), ce qui change drastiquement la rentabilité de sortie comparé à la détention en nom propre.
+## Lot 1 - Doctrine et socle de cartographie
 
-- [ ] **Dispositifs de Défiscalisation (Pinel, Denormandie, Loc'Avantages)** :
-  - Plafonnements stricts des loyers et des ressources des locataires.
-  - Avantage fiscal sous forme de réduction d'impôt (et non de déduction des revenus fonciers).
-  - Utile uniquement si la stratégie pivote vers l'optimisation de l'impôt sur le revenu global plutôt que sur la rentabilité pure du cash-flow.
+- [x] Formaliser la cartographie de viabilite comme prefiltre analytique.
+- [x] Unifier les seuils TRI, TRI P10, cash-on-cash, cash-flow et probabilite.
+- [x] Creer un plan d'experiences Sobol reproductible.
+- [x] Evaluer les biens hypothetiques sous des chocs economiques communs.
+- [ ] Mesurer la convergence et raffiner les frontieres.
 
-- [ ] **Agent IA "Scraper" d'Annonces** :
-  - Brancher un Agent IA qui scanne les annonces réelles (Leboncoin, SeLoger).
-  - L'Agent ne remontera à l'utilisateur que les annonces qui "matchent" mathématiquement les "Golden Rules" extraites par la simulation de masse.
+## Lot 2 - Qualification rapide d'une annonce
+
+- [ ] Versionner et charger les artefacts de cartographie.
+- [ ] Projeter une annonce complete dans la carte.
+- [ ] Interroger des plages plausibles lorsque des donnees manquent.
+- [ ] Produire une qualification explicable et une distance a la frontiere.
+
+## Lot 3 - Integration du pipeline
+
+- [ ] Persister les runs de qualification rapide.
+- [ ] Reserver Monte Carlo et solveur aux annonces preselectionnees.
+- [ ] Afficher potentiel, confiance et raisons dans Streamlit.
+- [ ] Valider le taux de faux negatifs face aux analyses completes.
+
+## Lot 4 - Acquisition et extension
+
+- [ ] Brancher une source de decouverte a grand volume.
+- [ ] Extraire les donnees minimales sans LLM lorsque possible.
+- [ ] Etendre la cartographie aux autres segments de Grenoble puis a Nimes.
+
+## Evolutions non prioritaires
+
+- Modelisation des societes a l'IS.
+- Dispositifs de defiscalisation specifiques.

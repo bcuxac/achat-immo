@@ -56,7 +56,7 @@ class MonteCarloRunner:
             assurance_emprunteur_annuelle_pct=strategy.assurance_emprunteur_pct,
         )
         
-        fiscalite = Fiscalite(regime=strategy.regime_fiscal)
+        fiscalite = Fiscalite(regime=strategy.regime_fiscal, tmi_pct=strategy.tmi_pct)
         
         scenario_proj = Scenario(
             nom=f"sim_mc_{s_in.scenario_id}",
@@ -86,7 +86,7 @@ class MonteCarloRunner:
                 cashflow_annuel_minimal=cf_min,
                 nb_annees_cashflow_negatif=res.nb_annees_cashflow_negatif,
                 patrimoine_net_horizon=res.patrimoine_net_horizon,
-                prix_net_revente=res.patrimoine_net_sortie, # Wait, patrimoine_net_sortie vs flux_sortie_net, let's use res.plus_value.prix_net_vendeur ?
+                prix_net_revente=float(res.plus_value.get("prix_cession_net", 0.0)),
                 impot_total_paye=res.impots_total_horizon,
             )
         except Exception as e:

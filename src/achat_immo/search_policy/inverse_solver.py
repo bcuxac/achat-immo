@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from achat_immo.analysis.metrics import summarize_monte_carlo_outputs
+from achat_immo.qualification import ProfitabilityTargets, evaluate_monte_carlo_summary
 from achat_immo.search_policy.financing import FinancingPolicy, project_cost
 from achat_immo.stochastic.models import Strategy, ScenarioInput
 from achat_immo.stochastic.monte_carlo import MonteCarloRunner
@@ -193,17 +194,14 @@ class InverseSolver:
         min_coc_median: float,
         min_monthly_cashflow_median: float,
     ) -> bool:
-        if summary.get("tri_median") is None or summary.get("tri_p10") is None:
-            return False
-        if summary.get("coc_median") is None:
-            return False
-        return (
-            summary["tri_median"] >= target_tri_median
-            and summary["tri_p10"] >= target_tri_p10
-            and summary["probabilite_cashflow_cumule_positif"] >= min_prob_positive_cashflow
-            and summary["coc_median"] >= min_coc_median
-            and summary["cashflow_mensuel_minimal_median"] >= min_monthly_cashflow_median
+        targets = ProfitabilityTargets(
+            target_tri_median=target_tri_median,
+            target_tri_p10=target_tri_p10,
+            target_coc=min_coc_median,
+            target_cashflow=min_monthly_cashflow_median,
+            min_prob_positive_cashflow=min_prob_positive_cashflow,
         )
+        return evaluate_monte_carlo_summary(summary, targets).meets_targets
 
     def _criteria(
         self,

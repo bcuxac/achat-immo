@@ -257,6 +257,30 @@ def test_property_decision_summary_normalizes_cashflow_probability_ratio() -> No
     assert "20 %" in low_summary.reason
 
 
+def test_property_decision_summary_reconnait_un_solveur_abouti() -> None:
+    annonce = AnnonceRecord(
+        ville="Grenoble",
+        surface_m2=40.0,
+        prix_affiche=100_000.0,
+        dpe="D",
+        statut="a_verifier",
+        tri_p50=7.0,
+        cashflow_p50=40.0,
+        probabilite_cashflow_positif=0.65,
+        prix_cible_recommande=100_000.0,
+    )
+    hypotheses = HypothesesAchatRecord(loyer_hc_mensuel=700.0, taxe_fonciere=900.0)
+
+    summary = build_property_decision_summary(
+        annonce,
+        hypotheses,
+        [],
+        [{"solver_status": "solved"}],
+    )
+
+    assert summary.verdict == "Decider"
+
+
 def test_decision_ui_avoids_indirect_pipeline_and_fake_workflow_language() -> None:
     pipeline_source = Path(ui.PROJECT_ROOT / "app" / "views" / "pipeline.py").read_text(encoding="utf-8")
     sourcing_source = Path(ui.PROJECT_ROOT / "app" / "sections" / "sourcing_queue.py").read_text(encoding="utf-8")

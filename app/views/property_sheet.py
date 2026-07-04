@@ -211,7 +211,7 @@ def build_property_decision_summary(
             next_actions=("Lire les preuves d'extraction.", "Confirmer ou corriger les donnees factuelles."),
         )
 
-    if solver_status and solver_status not in {"ok", "optimal", "success"}:
+    if solver_status and solver_status not in {"ok", "optimal", "success", "solved", "already_viable"}:
         return PropertyDecisionSummary(
             verdict="Verifier",
             reason=f"Le solveur indique un statut a controler : {solver_status}.",

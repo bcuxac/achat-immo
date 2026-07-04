@@ -53,6 +53,7 @@ def test_monte_carlo_runner():
     summary = summarize_monte_carlo_outputs(outputs)
     assert summary["nb_scenarios_valides"] == 5
     assert summary["tri_median"] is not None
+    assert all(output.prix_net_revente > 0 for output in outputs)
 
 
 def test_monte_carlo_runner_reuse_des_scenarios_pretires():

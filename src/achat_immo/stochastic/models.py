@@ -13,6 +13,7 @@ class Strategy:
     duree_credit_annees: int = 20
     taux_credit_pct: float = 3.5
     assurance_emprunteur_pct: float = 0.3
+    tmi_pct: float = 30.0
     regime_fiscal: RegimeFiscal = RegimeFiscal.LMNP_REEL
     mode_location: ModeLocation = ModeLocation.MEUBLEE
     horizon_annees: int = 20

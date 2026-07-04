@@ -22,6 +22,11 @@ from achat_immo.schemas import (
     SourcingQueueRecordSchema,
     SourcingRunRecordSchema,
 )
+from achat_immo.investment_profile import (
+    DEFAULT_PROFILE_KEY,
+    PROFILE_SCHEMA_VERSION,
+    InvestmentProfile,
+)
 from achat_immo.storage_connection import (
     DEFAULT_DB_PATH,
     DatabaseConnection,
@@ -319,6 +324,91 @@ def get_annonce_bundle(
     if hypotheses_row is None:
         raise KeyError(f"Hypotheses introuvables pour l'annonce : {annonce_id}")
     return _annonce_from_row(annonce_row), _hypotheses_from_row(hypotheses_row)
+
+
+def get_investment_profile(
+    conn: DatabaseConnection,
+    profile_key: str = DEFAULT_PROFILE_KEY,
+) -> InvestmentProfile:
+    """Charge la derniere version du profil ou retourne les valeurs initiales."""
+
+    row = conn.execute(
+        """
+        SELECT config_json
+        FROM investment_profile_versions
+        WHERE profile_key = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (profile_key,),
+    ).fetchone()
+    return InvestmentProfile.from_json(str(row["config_json"])) if row else InvestmentProfile()
+
+
+def save_investment_profile(
+    conn: DatabaseConnection,
+    profile: InvestmentProfile,
+    profile_key: str = DEFAULT_PROFILE_KEY,
+) -> int:
+    """Ajoute une version seulement lorsque la configuration change."""
+
+    if not profile_key.strip():
+        raise ValueError("La cle du profil est obligatoire.")
+    latest = conn.execute(
+        """
+        SELECT id, config_hash
+        FROM investment_profile_versions
+        WHERE profile_key = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (profile_key,),
+    ).fetchone()
+    if latest and str(latest["config_hash"]) == profile.fingerprint:
+        return int(latest["id"])
+
+    insert_sql = """
+        INSERT INTO investment_profile_versions (
+            profile_key, date_creation, schema_version, config_hash, config_json
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            profile_key,
+            _now_iso(),
+            PROFILE_SCHEMA_VERSION,
+            profile.fingerprint,
+            profile.to_json(),
+        ),
+    )
+    version_id = int(cursor.fetchone()["id"]) if conn.is_postgres else int(cursor.lastrowid)
+    conn.commit()
+    return version_id
+
+
+def list_investment_profile_versions(
+    conn: DatabaseConnection,
+    profile_key: str = DEFAULT_PROFILE_KEY,
+    *,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        raise ValueError("La limite doit etre strictement positive.")
+    rows = conn.execute(
+        """
+        SELECT id, profile_key, date_creation, schema_version, config_hash
+        FROM investment_profile_versions
+        WHERE profile_key = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (profile_key, limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def save_simulation_run(

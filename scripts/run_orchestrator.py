@@ -19,6 +19,7 @@ from achat_immo.storage import (
     count_sourcing_queue,
     create_sourcing_run,
     enqueue_sourcing_url,
+    get_investment_profile,
     list_pending_sourcing_urls,
     open_database,
 )
@@ -161,22 +162,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Domaine autorise par le prefiltre. Peut etre repete. Par defaut, aucun filtrage domaine.",
     )
     parser.add_argument("--skip-prefilter", action="store_true", help="Desactive le prefiltre URL deterministe.")
-    parser.add_argument("--tri", type=float, default=6.0, help="TRI median cible minimum (%%).")
-    parser.add_argument("--tri-p10", type=float, default=3.0, help="TRI P10 cible minimum (%%).")
-    parser.add_argument("--coc", type=float, default=0.0, help="Cash-on-Cash cible minimum (%%).")
-    parser.add_argument("--cf", type=float, default=0.0, help="Cashflow mensuel cible minimum (EUR).")
+    parser.add_argument("--tri", type=float, help="Remplace le TRI median minimum du profil (%%).")
+    parser.add_argument("--tri-p10", type=float, help="Remplace le TRI P10 minimum du profil (%%).")
+    parser.add_argument("--coc", type=float, help="Remplace le Cash-on-Cash minimum du profil (%%).")
+    parser.add_argument("--cf", type=float, help="Remplace le cashflow mensuel minimum du profil (EUR).")
     return parser
 
 
-def build_orchestrator(args: argparse.Namespace) -> SourcingOrchestrator:
+def build_orchestrator(args: argparse.Namespace, profile) -> SourcingOrchestrator:
+    targets = {
+        "tri": profile.target_tri_median if args.tri is None else args.tri,
+        "tri_p10": profile.target_tri_p10 if args.tri_p10 is None else args.tri_p10,
+        "coc": profile.target_cash_on_cash if args.coc is None else args.coc,
+        "cf": profile.target_monthly_cashflow if args.cf is None else args.cf,
+    }
     logger.info(
         "Demarrage de l'orchestrateur. Cibles: TRI=%s%%, TRI_P10=%s%%, CoC=%s%%, CF=%s EUR",
-        args.tri,
-        args.tri_p10,
-        args.coc,
-        args.cf,
+        targets["tri"],
+        targets["tri_p10"],
+        targets["coc"],
+        targets["cf"],
     )
     return SourcingOrchestrator(
+        profile=profile,
         target_tri=args.tri,
         target_tri_p10=args.tri_p10,
         target_coc=args.coc,
@@ -196,8 +204,9 @@ def main() -> None:
 
     conn = open_database()
     try:
+        profile = get_investment_profile(conn)
         if args.url and not args.url_file and not args.process_queue and not args.queue_only:
-            orchestrator = build_orchestrator(args)
+            orchestrator = build_orchestrator(args, profile)
             annonce_id = orchestrator.process_url(conn, args.url)
             logger.info("Annonce sauvegardee avec succes. ID: %s", annonce_id)
             return
@@ -217,7 +226,7 @@ def main() -> None:
 
         if urls or args.process_queue:
             prefilter_policy = UrlPrefilterPolicy(allowed_domains=tuple(args.allowed_domain))
-            orchestrator = build_orchestrator(args)
+            orchestrator = build_orchestrator(args, profile)
             successes, failures, skipped, blocked = process_pending_queue(
                 conn,
                 orchestrator,

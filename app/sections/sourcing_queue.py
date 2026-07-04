@@ -16,6 +16,7 @@ from achat_immo.storage import (
     DatabaseConnection,
     enqueue_sourcing_url,
     get_sourcing_queue_item,
+    get_investment_profile,
     list_sourcing_queue,
     mark_sourcing_url_pending,
     mark_sourcing_url_skipped,
@@ -165,7 +166,7 @@ def _process_selected_item(conn: DatabaseConnection, item: dict[str, Any]) -> No
         st.error("GEMINI_API_KEY est requis dans l'environnement ou Streamlit secrets.")
         return
     with st.spinner("Traitement de l'URL en cours..."):
-        orchestrator = SourcingOrchestrator()
+        orchestrator = SourcingOrchestrator(profile=get_investment_profile(conn))
         result = process_sourcing_queue_item(
             conn,
             item,

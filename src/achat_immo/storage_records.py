@@ -31,7 +31,7 @@ class AnnonceRecord:
     prix_negocie: float | None = None
     dpe: str = ""
     description: str = ""
-    statut: str = "a_analyser"
+    statut: str = "a_verifier"
     notes: str = ""
     # Metrics pre-calculees par l'Orchestrateur (Monte Carlo & Solveur)
     tri_p50: float | None = None

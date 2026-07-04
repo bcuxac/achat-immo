@@ -24,7 +24,33 @@ gestion locative et fiscalite.
 - décision robuste fondée sur toute la distribution des scénarios ;
 - comparaison boursière volontairement mise de côté pour l'instant.
 
-## Moteur Probabiliste (Monte Carlo)
+## Cartographie de viabilite et analyse probabiliste
+
+Le prefiltrage a grande echelle repose desormais sur une cartographie hors
+ligne de biens hypothetiques. Pour une ville, un profil investisseur et des
+objectifs donnes, un plan d'experiences Sobol couvre l'espace prix, surface,
+loyer, charges, taxe fonciere, travaux et apport. Les plafonds de loyer distincts
+de la ville sont une dimension du plan ; les categories de bien servent ensuite
+uniquement a retrouver le plafond legal applicable. Tous les biens sont evalues
+sous les memes chocs economiques.
+
+Cette carte est destinee a identifier rapidement les annonces proches des zones
+de rentabilite viables. Un Monte Carlo propre au bien et le solveur inverse
+restent necessaires dans un second temps pour les opportunites preselectionnees.
+
+Construire la carte de la ville du profil actif :
+
+```bash
+uv run python scripts/build_viability_map.py --properties 64 --scenarios 20 --workers 1
+```
+
+Les fichiers generes sont places dans `outputs/viability/` et ne sont pas
+versionnes. Leur fichier de metadonnees contient toute la configuration utile a
+la reproductibilite. Ce volume volontairement modeste sert a valider le segment ;
+il devra etre augmente seulement apres mesure de la convergence et optimisation
+du cout de calcul.
+
+## Monte Carlo propre a une opportunite
 
 Le simulateur dispose d'une couche d'analyse stochastique par méthode de Monte Carlo pour évaluer la robustesse d'une stratégie d'investissement face aux incertitudes (vacance locative, loyer effectif, travaux imprévus, plus-value, etc.).
 
@@ -34,11 +60,6 @@ Le simulateur dispose d'une couche d'analyse stochastique par méthode de Monte 
 3. Le moteur génère des centaines de scénarios et les évalue à travers le moteur de projection déterministe.
 4. Les KPIs sont agrégés pour obtenir des statistiques robustes (TRI médian, TRI P10 pessimiste, probabilité de cash-flow négatif).
 
-**Lancer un exemple :**
-```bash
-uv run python scripts/monte_carlo_grenoble.py
-```
-
 **Interpréter les résultats :**
 - **TRI P50 (Médian)** : Le rendement le plus probable.
 - **TRI P10 (Pessimiste)** : Dans 90% des cas, vous ferez mieux que ce chiffre. C'est l'indicateur de risque clé.
@@ -46,7 +67,9 @@ uv run python scripts/monte_carlo_grenoble.py
 - **Sensibilité** : Met en évidence les variables qui ont le plus d'impact sur votre rentabilité (via une corrélation de Spearman).
 
 **Génération de Critères de Recherche :**
-Plutôt que d'évaluer les annonces une par une, l'outil propose un Solver Inversé (`InverseSolver`). Il fait varier les paramètres d'entrée (prix d'achat max, loyer cible) pour trouver la "zone" mathématique qui satisfait vos objectifs probabilistes (ex: TRI P10 > 3%). Ces critères pourront ensuite être utilisés pour configurer un agent de sourcing automatique.
+Pour une opportunite preselectionnee, le solveur inverse (`InverseSolver`) fait
+varier le prix d'achat afin de calculer le prix maximal compatible avec les
+objectifs probabilistes, par exemple un TRI P10 superieur a 3 %.
 
 ## Architecture
 
@@ -59,7 +82,7 @@ src/
 │   ├── stochastic/     # moteur monte carlo, distributions, generateur
 │   ├── analysis/       # statistiques et analyses de sensibilite
 │   ├── search_policy/  # solver inverse generant les criteres de recherche
-│   ├── deal_scoring/   # notation globale des annonces
+│   ├── viability/      # cartographie hors ligne des zones viables
 │   ├── city_profiles.py# profils locaux : villes ciblees, encadrement, plafonds
 │   ├── diagnostics.py  # points bloquants, donnees manquantes et alertes metier
 │   ├── storage.py      # stockage SQLite local
@@ -110,7 +133,20 @@ Workflow de l'application :
   donnees extraites, hypotheses, analyse financiere, preuves et decision ;
 - `Comparaison` arbitre uniquement les opportunites shortlistees ou actives ;
 - `Parametres / Automatisation` explicite les secrets attendus, le workflow
-  GitHub Actions et les limites operationnelles.
+  GitHub Actions, les limites operationnelles et le profil d'investissement.
+
+### Profil d'investissement versionne
+
+La page `Parametres / Automatisation` permet de modifier le budget total,
+l'apport, le financement, la TMI, l'horizon, les objectifs de rentabilite, les
+budgets de calcul et les hypotheses economiques. Chaque enregistrement ajoute
+une version immuable identifiee par un hash. La cartographie, le sourcing et les
+relances manuelles lisent ce profil ; les analyses enregistrent son hash dans
+leurs diagnostics.
+
+Les baremes fiscaux et plafonds legaux ne sont pas des preferences utilisateur :
+ils restent versionnes dans le code et testes separement. L'inventaire des
+valeurs encore a traiter est maintenu dans `docs/configuration_audit.md`.
 
 ## Deploiement gratuit pour deux utilisateurs
 
@@ -223,7 +259,7 @@ resultat = simuler_bien_sur_horizon(
 print(resultat.indicateurs)
 ```
 
-## CLI CSV
+## CLI CSV de compatibilite
 
 ```bash
 uv run achat-immo data/annonces.csv --output outputs/comparaison.xlsx

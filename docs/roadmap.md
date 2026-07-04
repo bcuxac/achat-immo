@@ -10,13 +10,19 @@ Ce document trace l'avancement global de l'application et les prochaines étapes
 - [x] Orchestrateur en tâche de fond (`run_orchestrator.py`).
 - [x] Intégration à l'interface Streamlit (UI robuste, sauvegarde en base de données).
 
-## Phase 2 : Automatisation et Déploiement "Aspirateur à 0€" (À Faire ⏳)
-L'objectif est d'avoir un "aspirateur" automatisé qui tourne sans intervention humaine, récupère de nouvelles annonces, passe l'orchestrateur et nourrit la base de données.
+## Phase 2 : Cartographie de viabilite et prefiltrage (En cours)
+L'objectif est de precalculer les zones de rentabilite par ville et profil
+investisseur avant de soumettre les annonces prometteuses a l'orchestrateur.
 
-- [ ] **Définir la source de l'Aspirateur** : Lien de recherche globale Jinka, ou liste d'alertes e-mails, ou fichier d'URLs.
-- [ ] **Automatisation CI/CD (GitHub Actions)** : Configurer un job (ex: CRON tous les matins) qui lance le script `run_orchestrator.py` sur les nouvelles annonces.
-- [ ] **Persistance à 0€** : S'assurer que le stockage des annonces soit pérenne (soit via commit auto du fichier `sqlite` dans le dépôt privé, soit via une base Postgres gratuite distante type Neon/Supabase).
+- [x] Plan d'experiences Sobol pour les biens hypothetiques.
+- [x] Scenarios economiques communs et qualification canonique.
+- [ ] Artefact de carte indexe et interrogation d'une annonce.
+- [ ] Validation du prefiltre face a un Monte Carlo complet.
+- [ ] Integration dans l'orchestrateur avant l'analyse approfondie.
 
-## Phase 3 : Notifications et Veille Active (Futures idées 💡)
+## Phase 3 : Acquisition massive et veille active
+- [ ] Définir la source de découverte : alertes, exports ou pages de résultats.
+- [ ] Extraire les donnees minimales sans appel LLM systematique.
+- [ ] Utiliser la carte pour limiter les analyses approfondies.
 - [ ] Notifications Telegram/Discord/Email des annonces identifiées comme "Coup de cœur" par le solveur inversé.
 - [ ] Génération automatique du dossier de financement (PDF).

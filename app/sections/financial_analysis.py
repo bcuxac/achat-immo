@@ -25,11 +25,13 @@ from achat_immo.models import (
     RegimeFiscal,
     Scenario,
 )
+from achat_immo.investment_profile import InvestmentProfile
 from achat_immo.robustness import analyser_grille
 from achat_immo.storage import (
     AnnonceRecord,
     DatabaseConnection,
     fiscalite_from_hypotheses,
+    get_investment_profile,
     HypothesesAchatRecord,
     save_simulation_run,
     to_domain_models,
@@ -65,6 +67,7 @@ def financial_analysis_section(
         
     bien, location, _ = to_domain_models(annonce, hypotheses)
     fiscalite = fiscalite_from_hypotheses(hypotheses)
+    profile = get_investment_profile(conn)
 
     st.subheader("Grille de simulation")
     st.caption("Les parametres peuvent bouger librement. Le moteur ne calcule qu'au clic.")
@@ -73,6 +76,7 @@ def financial_analysis_section(
         location,
         hypotheses,
         fiscalite,
+        profile,
     )
     signature = repr((signature, fiscalite))
     _simulation_summary(bien_simule, params, scenario_count)
@@ -188,6 +192,7 @@ def _simulation_inputs(
     location: HypothesesLocation,
     hypotheses: HypothesesAchatRecord,
     fiscalite: Any,
+    profile: InvestmentProfile,
 ) -> tuple[BienImmobilier, HypothesesLocation, GrilleParametres, Scenario, str, int, str]:
     st.subheader("Parametres de simulation")
     st.caption(
@@ -197,6 +202,10 @@ def _simulation_inputs(
 
     plafond_loyer = loyer_max_hc_mensuel(bien, location)
     loyer_reference = float(hypotheses.loyer_hc_mensuel)
+    rate_reference = float(profile.credit_rate_pct)
+    rate_options = sorted({round(max(0.0, rate_reference + delta), 2) for delta in (-0.3, 0.0, 0.3)})
+    equity_midpoint = round((profile.equity_min + profile.equity_max) / 2, 2)
+    equity_options = sorted({profile.equity_min, equity_midpoint, profile.equity_max})
     if plafond_loyer is not None:
         loyer_reference = min(loyer_reference, plafond_loyer)
         st.caption(f"Plafond local calcule : {plafond_loyer:,.0f} EUR HC/mois.")
@@ -226,31 +235,31 @@ def _simulation_inputs(
         with c3:
             taux_proposes = st.multiselect(
                 "Taux credit testes",
-                [3.3, 3.6, 4.0],
-                default=[3.3, 3.6, 4.0],
+                rate_options,
+                default=rate_options,
                 format_func=lambda value: f"{value:.2f} %",
                 help=SIMULATION_HELP["taux_credit"],
             )
         with c4:
             durees_proposees = st.multiselect(
                 "Durees credit",
-                [15, 20, 25],
-                default=[20, 25],
+                [profile.credit_duration_years],
+                default=[profile.credit_duration_years],
                 format_func=lambda value: f"{value} ans",
                 help=SIMULATION_HELP["durees"],
             )
         with c5:
             apports = st.multiselect(
                 "Apports",
-                [10_000.0, 15_000.0, 20_000.0, 25_000.0],
-                default=[10_000.0, 15_000.0, 20_000.0],
+                equity_options,
+                default=equity_options,
                 format_func=lambda value: f"{value:,.0f} EUR",
                 help=SIMULATION_HELP["apports"],
             )
         assurance_emprunteur = st.number_input(
             "Assurance emprunteur %/an",
             min_value=0.0,
-            value=float(hypotheses.assurance_emprunteur_pct),
+            value=float(profile.borrower_insurance_pct),
             step=0.05,
             format="%.2f",
             help=SIMULATION_HELP["assurance_emprunteur"],
@@ -291,12 +300,36 @@ def _simulation_inputs(
             )
             loyer_pas = st.number_input("Pas loyer", min_value=1.0, value=25.0, step=5.0)
         with g3:
-            taux_min = st.number_input("Taux credit min %", min_value=0.0, value=3.30, step=0.10, format="%.2f")
-            taux_max = st.number_input("Taux credit max %", min_value=0.0, value=4.00, step=0.10, format="%.2f")
+            taux_min = st.number_input(
+                "Taux credit min %",
+                min_value=0.0,
+                value=max(0.0, rate_reference - 0.3),
+                step=0.10,
+                format="%.2f",
+            )
+            taux_max = st.number_input(
+                "Taux credit max %",
+                min_value=0.0,
+                value=rate_reference + 0.3,
+                step=0.10,
+                format="%.2f",
+            )
             taux_pas = st.number_input("Pas taux %", min_value=0.01, value=0.10, step=0.01, format="%.2f")
         with g4:
-            duree_min = st.number_input("Duree credit min annees", min_value=1, max_value=30, value=15, step=1)
-            duree_max = st.number_input("Duree credit max annees", min_value=1, max_value=30, value=25, step=1)
+            duree_min = st.number_input(
+                "Duree credit min annees",
+                min_value=1,
+                max_value=30,
+                value=profile.credit_duration_years,
+                step=1,
+            )
+            duree_max = st.number_input(
+                "Duree credit max annees",
+                min_value=1,
+                max_value=30,
+                value=profile.credit_duration_years,
+                step=1,
+            )
             duree_pas = st.number_input("Pas duree annees", min_value=1, max_value=10, value=1, step=1)
 
     exploitation, strategies, analyse = st.columns(3)
@@ -318,8 +351,8 @@ def _simulation_inputs(
             )
             frais_gestion = st.multiselect(
                 "Frais gestion agence %",
-                [5.0, 7.0, 8.0],
-                default=[7.0],
+                [profile.management_fee_pct],
+                default=[profile.management_fee_pct],
                 help=SIMULATION_HELP["frais_gestion"],
             )
 
@@ -355,8 +388,8 @@ def _simulation_inputs(
             horizon = st.number_input(
                 "Horizon analyse annees",
                 min_value=1,
-                max_value=30,
-                value=10,
+                max_value=50,
+                value=profile.holding_horizon_years,
                 step=1,
                 help=SIMULATION_HELP["horizon"],
             )
@@ -400,7 +433,7 @@ def _simulation_inputs(
     location_simulee = replace(
         location,
         loyer_hc_mensuel=float(loyers[0]) if loyers else location.loyer_hc_mensuel,
-        frais_gestion_pct=float(frais_gestion[0]) if frais_gestion else 7.0,
+        frais_gestion_pct=float(frais_gestion[0]) if frais_gestion else profile.management_fee_pct,
     )
     params = GrilleParametres(
         prix_achats=_as_float_tuple(list(prix_achats)),

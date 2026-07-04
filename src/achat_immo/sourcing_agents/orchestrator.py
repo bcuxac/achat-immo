@@ -9,17 +9,20 @@ from achat_immo.storage_records import (
     ExtractionRunRecord,
     HypothesesAchatRecord,
 )
-from achat_immo.models import RegimeFiscal, ModeLocation, TypeBien
+from achat_immo.models import ModeLocation, TypeBien
+from achat_immo.investment_profile import InvestmentProfile
 from achat_immo.search_policy.financing import FinancingPolicy
+from achat_immo.qualification import ProfitabilityTargets, evaluate_monte_carlo_summary
 from achat_immo.stochastic.models import Strategy
 from achat_immo.stochastic.distributions import Distribution, TriangularDist, TruncatedNormalDist
+from achat_immo.stochastic.assumptions import StochasticAssumptions
 from achat_immo.stochastic.scenario_generator import ScenarioGenerator
 from achat_immo.stochastic.monte_carlo import MonteCarloRunner
 from achat_immo.search_policy.inverse_solver import InverseSolver
 from achat_immo.analysis.metrics import summarize_monte_carlo_outputs
 from achat_immo.sourcing_agents.content_guard import SourcingAccessBlockedError, ensure_content_accessible
 from achat_immo.sourcing_agents.llm_agent import LLMSourcingAgent
-from achat_immo.deal_scoring.candidate_property import CandidateProperty
+from achat_immo.sourcing_agents.models import CandidateProperty
 from achat_immo.storage import (
     DatabaseConnection,
     find_annonce_id_by_url,
@@ -44,64 +47,127 @@ def stable_seed(value: str, fallback: int = 42) -> int:
 def build_sourcing_stochastic_config(
     candidate: CandidateProperty,
     strategy: Strategy,
+    assumptions: StochasticAssumptions | None = None,
 ) -> dict[str, Distribution]:
     """Construit les distributions d'incertitude utilisées par l'aspirateur.
 
-    Les bornes restent volontairement prudentes : le scoring automatique doit
-    plutôt rater une bonne annonce que promouvoir une annonce sur des données
-    insuffisantes.
+    Les bornes restent prudentes et explicites. Les donnees insuffisantes sont
+    signalees separement afin de ne pas transformer une valeur de repli en fait.
     """
 
+    assumptions = assumptions or StochasticAssumptions()
     confidence = (candidate.confiance_loyer or "basse").lower()
     rent = strategy.loyer_hc_mensuel
     if confidence == "haute":
-        rent_distribution = TriangularDist(rent * 0.95, rent, rent * 1.03)
+        rent_distribution = TriangularDist(
+            rent
+            * (
+                assumptions.rent_multiplier_mode
+                - (assumptions.rent_multiplier_mode - assumptions.rent_multiplier_low) * 0.5
+            ),
+            rent * assumptions.rent_multiplier_mode,
+            rent
+            * (
+                assumptions.rent_multiplier_mode
+                + (assumptions.rent_multiplier_high - assumptions.rent_multiplier_mode) * 0.5
+            ),
+        )
     elif confidence == "moyenne":
-        rent_distribution = TriangularDist(rent * 0.90, rent, rent * 1.07)
+        rent_distribution = TriangularDist(
+            rent * assumptions.rent_multiplier_low,
+            rent * assumptions.rent_multiplier_mode,
+            rent * assumptions.rent_multiplier_high,
+        )
     else:
-        rent_distribution = TriangularDist(rent * 0.80, rent, rent * 1.10)
+        rent_distribution = TriangularDist(
+            rent
+            * max(
+                0.0,
+                assumptions.rent_multiplier_mode
+                - (assumptions.rent_multiplier_mode - assumptions.rent_multiplier_low) * 2,
+            ),
+            rent * assumptions.rent_multiplier_mode,
+            rent
+            * (
+                assumptions.rent_multiplier_mode
+                + (assumptions.rent_multiplier_high - assumptions.rent_multiplier_mode) * 2
+            ),
+        )
 
     dpe = (candidate.dpe or "").upper()
     red_flags = " ".join(candidate.red_flags or []).lower()
     has_energy_risk = dpe in {"F", "G"} or "passoire" in red_flags or "dpe" in red_flags
     if has_energy_risk:
-        future_works_high = max(2_000.0, strategy.surface_m2 * 120.0)
-        future_works_mode = max(500.0, strategy.surface_m2 * 35.0)
+        future_works_high = max(2_000.0, strategy.surface_m2 * assumptions.unexpected_works_max_per_m2)
+        future_works_mode = max(500.0, strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2)
     elif strategy.travaux_initiaux > 0:
-        future_works_high = max(1_500.0, strategy.travaux_initiaux * 0.12)
-        future_works_mode = max(250.0, strategy.travaux_initiaux * 0.03)
+        future_works_high = max(
+            strategy.surface_m2 * assumptions.unexpected_works_max_per_m2,
+            strategy.travaux_initiaux * 0.12,
+        )
+        future_works_mode = max(
+            strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2,
+            strategy.travaux_initiaux * 0.03,
+        )
     else:
-        future_works_high = max(900.0, strategy.surface_m2 * 25.0)
-        future_works_mode = max(150.0, strategy.surface_m2 * 8.0)
+        future_works_high = strategy.surface_m2 * assumptions.unexpected_works_max_per_m2
+        future_works_mode = strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2
 
     return {
         "loyer_hc_mensuel": rent_distribution,
-        "vacance_mois_par_an": TruncatedNormalDist(mean=1.2, std=0.8, low=0.0, high=6.0),
-        "croissance_loyer_annuelle_pct": TruncatedNormalDist(mean=1.0, std=0.6, low=0.0, high=3.0),
-        "inflation_charges_annuelle_pct": TruncatedNormalDist(mean=2.5, std=1.0, low=0.0, high=6.0),
+        "vacance_mois_par_an": TruncatedNormalDist(
+            mean=assumptions.vacancy_mean_months,
+            std=assumptions.vacancy_std_months,
+            low=0.0,
+            high=assumptions.vacancy_max_months,
+        ),
+        "croissance_loyer_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_rent_growth_mean_pct,
+            std=assumptions.annual_rent_growth_std_pct,
+            low=assumptions.annual_rent_growth_min_pct,
+            high=assumptions.annual_rent_growth_max_pct,
+        ),
+        "inflation_charges_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_charge_inflation_mean_pct,
+            std=assumptions.annual_charge_inflation_std_pct,
+            low=assumptions.annual_charge_inflation_min_pct,
+            high=assumptions.annual_charge_inflation_max_pct,
+        ),
         "travaux_imprevus_annuels": TriangularDist(0.0, future_works_mode, future_works_high),
-        "appreciation_bien_annuelle_pct": TruncatedNormalDist(mean=0.5, std=1.4, low=-3.0, high=4.0),
-        "decote_revente_pct": TruncatedNormalDist(mean=7.0, std=1.0, low=5.0, high=10.0),
+        "appreciation_bien_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_appreciation_mean_pct,
+            std=assumptions.annual_appreciation_std_pct,
+            low=assumptions.annual_appreciation_min_pct,
+            high=assumptions.annual_appreciation_max_pct,
+        ),
+        "decote_revente_pct": TruncatedNormalDist(
+            mean=assumptions.resale_cost_mean_pct,
+            std=assumptions.resale_cost_std_pct,
+            low=assumptions.resale_cost_min_pct,
+            high=assumptions.resale_cost_max_pct,
+        ),
     }
 
 
 class SourcingOrchestrator:
     def __init__(
         self,
-        target_tri: float = 6.0,
-        target_coc: float = 0.0,
-        target_cf: float = 0.0,
-        target_tri_p10: float = 3.0,
+        profile: InvestmentProfile | None = None,
+        target_tri: float | None = None,
+        target_coc: float | None = None,
+        target_cf: float | None = None,
+        target_tri_p10: float | None = None,
     ):
+        self.profile = profile or InvestmentProfile()
         self.llm_agent = LLMSourcingAgent()
-        self.generator = ScenarioGenerator(config={}, seed=42)
         self.runner = MonteCarloRunner()
-        self.solver = InverseSolver(self.runner, self.generator)
-        
-        self.target_tri = target_tri
-        self.target_coc = target_coc
-        self.target_cf = target_cf
-        self.target_tri_p10 = target_tri_p10
+        self.targets = ProfitabilityTargets(
+            target_tri_median=self.profile.target_tri_median if target_tri is None else target_tri,
+            target_tri_p10=self.profile.target_tri_p10 if target_tri_p10 is None else target_tri_p10,
+            target_coc=self.profile.target_cash_on_cash if target_coc is None else target_coc,
+            target_cashflow=self.profile.target_monthly_cashflow if target_cf is None else target_cf,
+            min_prob_positive_cashflow=self.profile.min_positive_cashflow_probability,
+        )
         
     def _map_candidate_to_strategy(self, cand: CandidateProperty) -> Strategy:
         # Valeurs par defaut arbitraires si Gemini n'a rien trouvé
@@ -109,7 +175,7 @@ class SourcingOrchestrator:
         charges = (cand.charges_mensuelles * 12) if cand.charges_mensuelles else (cand.surface * 30.0)
         taxe = cand.taxe_fonciere or (cand.surface * 20.0)
         travaux = cand.travaux_visibles or 0.0
-        frais_notaire = cand.prix * 0.08
+        frais_notaire = cand.prix * self.profile.notary_cost_pct / 100
         
         return Strategy(
             ville=cand.ville,
@@ -121,11 +187,16 @@ class SourcingOrchestrator:
             travaux_initiaux=travaux,
             frais_notaire_estimes=frais_notaire,
             # Hypotheses conservatrices standard
-            apport=15000.0,
-            duree_credit_annees=20,
-            taux_credit_pct=3.5,
-            regime_fiscal=RegimeFiscal.LMNP_REEL,
-            mode_location=ModeLocation.MEUBLEE
+            apport=self.profile.equity_max,
+            duree_credit_annees=self.profile.credit_duration_years,
+            taux_credit_pct=self.profile.credit_rate_pct,
+            assurance_emprunteur_pct=self.profile.borrower_insurance_pct,
+            tmi_pct=self.profile.marginal_tax_rate_pct,
+            regime_fiscal=self.profile.reference_tax_regime,
+            mode_location=ModeLocation.MEUBLEE,
+            horizon_annees=self.profile.holding_horizon_years,
+            gestion_agence_active=self.profile.management_enabled,
+            frais_gestion_pct=self.profile.management_fee_pct,
         )
 
     def process_url(self, conn: DatabaseConnection, url: str) -> int:
@@ -157,13 +228,16 @@ class SourcingOrchestrator:
         strategy = financing_policy.apply(raw_strategy)
         scenario_seed = stable_seed(final_url)
         generator = ScenarioGenerator(
-            build_sourcing_stochastic_config(candidate, strategy),
+            build_sourcing_stochastic_config(candidate, strategy, self.profile.stochastic_assumptions),
             seed=scenario_seed,
         )
         
         # 1. Simulation Monte Carlo
-        logger.info("Exécution du Monte Carlo (1000 scénarios)...")
-        outputs = self.runner.run(strategy, generator, n_scenarios=1000)
+        logger.info(
+            "Exécution du Monte Carlo (%s scénarios)...",
+            self.profile.detailed_scenario_count,
+        )
+        outputs = self.runner.run(strategy, generator, n_scenarios=self.profile.detailed_scenario_count)
         summary = summarize_monte_carlo_outputs(outputs)
         
         tri_p50 = summary.get("tri_median")
@@ -173,26 +247,26 @@ class SourcingOrchestrator:
         cf_p50 = summary.get("cashflow_mensuel_minimal_median")
         
         # 2. Evaluation
-        meets_criteria = False
-        if tri_p50 is not None and coc_p50 is not None and cf_p50 is not None:
-            if (tri_p50 >= self.target_tri and 
-                coc_p50 >= self.target_coc and 
-                cf_p50 >= self.target_cf):
-                meets_criteria = True
-                
-        statut = "a_analyser" if meets_criteria else "hors_criteres"
+        evaluation = evaluate_monte_carlo_summary(summary, self.targets)
+        statut = "a_verifier" if evaluation.meets_targets else "hors_criteres"
         
         # 3. Inverse Solver
-        logger.info(f"Exécution du Solveur Inversé (Cibles: TRI>={self.target_tri}%, CoC>={self.target_coc}%, CF>={self.target_cf}€)...")
+        logger.info(
+            "Exécution du Solveur Inversé (Cibles: TRI>=%s%%, TRI P10>=%s%%, CoC>=%s%%, CF>=%s EUR)...",
+            self.targets.target_tri_median,
+            self.targets.target_tri_p10,
+            self.targets.target_coc,
+            self.targets.target_cashflow,
+        )
         solver = InverseSolver(self.runner, generator)
         criteria = solver.find_criteria(
             strategy,
-            target_tri_median=self.target_tri,
-            target_tri_p10=self.target_tri_p10,
-            min_coc_median=self.target_coc,
-            min_monthly_cashflow_median=self.target_cf,
-            min_prob_positive_cashflow=0.5,
-            n_scenarios_per_eval=300,
+            target_tri_median=self.targets.target_tri_median,
+            target_tri_p10=self.targets.target_tri_p10,
+            min_coc_median=self.targets.target_coc,
+            min_monthly_cashflow_median=self.targets.target_cashflow,
+            min_prob_positive_cashflow=self.targets.min_prob_positive_cashflow,
+            n_scenarios_per_eval=self.profile.solver_scenario_count,
             financing_policy=financing_policy,
         )
         prix_recommande = criteria.max_price if criteria else None
@@ -202,6 +276,8 @@ class SourcingOrchestrator:
         notes_str += f"Donnees manquantes: {', '.join(candidate.donnees_manquantes) if candidate.donnees_manquantes else 'Aucune'}"
         notes_str += f"\nSeed scenarios: {scenario_seed}"
         notes_str += f"\nFinancement: {financing_policy.describe()}"
+        notes_str += f"\nProfil: {self.profile.fingerprint[:12]}"
+        notes_str += f"\nQualification: {' | '.join(evaluation.reasons) or 'seuils_atteints'}"
         if criteria:
             notes_str += f"\nSolveur: {criteria.status}, iterations={criteria.iterations}, scenarios={criteria.n_scenarios}"
             notes_str += f"\nDiagnostics solveur: {' | '.join(criteria.diagnostics)}"
@@ -270,10 +346,10 @@ class SourcingOrchestrator:
                 solver_iterations=criteria.iterations if criteria else 0,
                 price_floor=criteria.price_floor if criteria else None,
                 price_ceiling=criteria.price_ceiling if criteria else None,
-                target_tri_median=self.target_tri,
-                target_tri_p10=self.target_tri_p10,
-                target_coc=self.target_coc,
-                target_cashflow=self.target_cf,
+                target_tri_median=self.targets.target_tri_median,
+                target_tri_p10=self.targets.target_tri_p10,
+                target_coc=self.targets.target_coc,
+                target_cashflow=self.targets.target_cashflow,
                 tri_p50=tri_p50,
                 tri_p10=tri_p10,
                 probabilite_cashflow_positif=prob_cf,
@@ -285,9 +361,10 @@ class SourcingOrchestrator:
                 recommended_loan_amount=criteria.loan_amount if criteria else None,
                 summary_json=json.dumps(summary, sort_keys=True),
                 diagnostics=(
-                    " | ".join(criteria.diagnostics)
+                    f"profil={self.profile.fingerprint[:12]} | " + " | ".join(criteria.diagnostics)
                     if criteria
-                    else " | ".join(solver.last_diagnostics) or "Aucun prix cible viable."
+                    else f"profil={self.profile.fingerprint[:12]} | "
+                    + (" | ".join(solver.last_diagnostics) or "Aucun prix cible viable.")
                 ),
             ),
         )

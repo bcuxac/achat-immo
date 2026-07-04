@@ -7,9 +7,12 @@ import hashlib
 import json
 
 from achat_immo.analysis.metrics import summarize_monte_carlo_outputs
+from achat_immo.investment_profile import InvestmentProfile
 from achat_immo.search_policy.financing import FinancingPolicy
 from achat_immo.search_policy.inverse_solver import InverseSolver, SearchCriteria
+from achat_immo.qualification import AnalysisTargets, evaluate_monte_carlo_summary
 from achat_immo.stochastic.distributions import Distribution, TriangularDist, TruncatedNormalDist
+from achat_immo.stochastic.assumptions import StochasticAssumptions
 from achat_immo.stochastic.monte_carlo import MonteCarloRunner
 from achat_immo.stochastic.models import Strategy
 from achat_immo.stochastic.scenario_generator import ScenarioGenerator
@@ -30,17 +33,6 @@ HUMAN_MANAGED_STATUSES = {
 
 
 @dataclass(frozen=True, slots=True)
-class AnalysisTargets:
-    target_tri_median: float = 6.0
-    target_tri_p10: float = 3.0
-    target_coc: float = 0.0
-    target_cashflow: float = 0.0
-    min_prob_positive_cashflow: float = 0.5
-    n_scenarios: int = 1000
-    n_solver_scenarios: int = 300
-
-
-@dataclass(frozen=True, slots=True)
 class ManualAnalysisResult:
     annonce_id: int
     analysis_run_id: int
@@ -56,18 +48,23 @@ def rerun_financial_analysis(
     hypotheses: HypothesesAchatRecord,
     *,
     targets: AnalysisTargets | None = None,
+    profile: InvestmentProfile | None = None,
     run_source: str = "streamlit_manual",
 ) -> ManualAnalysisResult:
     """Relance Monte Carlo + solveur inverse sur les donnees deja stockees."""
 
     if annonce.id is None:
         raise ValueError("L'annonce doit etre sauvegardee avant analyse.")
-    targets = targets or AnalysisTargets()
+    profile = profile or InvestmentProfile()
+    targets = targets or profile.analysis_targets
     raw_strategy = strategy_from_records(annonce, hypotheses)
     financing_policy = FinancingPolicy.from_strategy(raw_strategy)
     strategy = financing_policy.apply(raw_strategy)
     scenario_seed = stable_seed(annonce.url or f"annonce:{annonce.id}:{annonce.prix_affiche}")
-    generator = ScenarioGenerator(build_manual_stochastic_config(annonce, strategy), seed=scenario_seed)
+    generator = ScenarioGenerator(
+        build_manual_stochastic_config(annonce, strategy, profile.stochastic_assumptions),
+        seed=scenario_seed,
+    )
     runner = MonteCarloRunner()
 
     outputs = runner.run(strategy, generator, n_scenarios=targets.n_scenarios)
@@ -89,7 +86,7 @@ def rerun_financial_analysis(
         n_scenarios_per_eval=targets.n_solver_scenarios,
         financing_policy=financing_policy,
     )
-    status = _status_after_analysis(annonce.statut, tri_p50, coc_p50, cf_p50, targets)
+    status = _status_after_analysis(annonce.statut, summary, targets)
     updated_annonce = replace(
         annonce,
         statut=status,
@@ -102,7 +99,13 @@ def rerun_financial_analysis(
     )
     save_annonce(conn, updated_annonce, hypotheses)
 
-    diagnostics = _analysis_diagnostics(run_source, financing_policy, criteria, solver.last_diagnostics)
+    diagnostics = _analysis_diagnostics(
+        run_source,
+        financing_policy,
+        criteria,
+        solver.last_diagnostics,
+        profile.fingerprint,
+    )
     analysis_run_id = save_analysis_run(
         conn,
         AnalysisRunRecord(
@@ -153,6 +156,7 @@ def strategy_from_records(annonce: AnnonceRecord, hypotheses: HypothesesAchatRec
         duree_credit_annees=hypotheses.duree_credit_reference,
         taux_credit_pct=hypotheses.taux_credit_reference,
         assurance_emprunteur_pct=hypotheses.assurance_emprunteur_pct,
+        tmi_pct=hypotheses.tmi_pct,
         regime_fiscal=hypotheses.regime_fiscal,
         mode_location=hypotheses.mode_location,
         loyer_hc_mensuel=hypotheses.loyer_hc_mensuel,
@@ -169,29 +173,66 @@ def strategy_from_records(annonce: AnnonceRecord, hypotheses: HypothesesAchatRec
 def build_manual_stochastic_config(
     annonce: AnnonceRecord,
     strategy: Strategy,
+    assumptions: StochasticAssumptions | None = None,
 ) -> dict[str, Distribution]:
+    assumptions = assumptions or StochasticAssumptions()
     rent = strategy.loyer_hc_mensuel
     dpe = (annonce.dpe or "").upper()
     notes = (annonce.notes or "").lower()
     has_energy_risk = dpe in {"F", "G"} or "passoire" in notes
     if has_energy_risk:
-        works_mode = max(500.0, strategy.surface_m2 * 35.0)
-        works_high = max(2_000.0, strategy.surface_m2 * 120.0)
+        works_mode = max(strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2, 500.0)
+        works_high = max(strategy.surface_m2 * assumptions.unexpected_works_max_per_m2, 2_000.0)
     elif strategy.travaux_initiaux > 0:
-        works_mode = max(250.0, strategy.travaux_initiaux * 0.03)
-        works_high = max(1_500.0, strategy.travaux_initiaux * 0.12)
+        works_mode = max(
+            strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2,
+            strategy.travaux_initiaux * 0.03,
+        )
+        works_high = max(
+            strategy.surface_m2 * assumptions.unexpected_works_max_per_m2,
+            strategy.travaux_initiaux * 0.12,
+        )
     else:
-        works_mode = max(150.0, strategy.surface_m2 * 8.0)
-        works_high = max(900.0, strategy.surface_m2 * 25.0)
+        works_mode = strategy.surface_m2 * assumptions.unexpected_works_mode_per_m2
+        works_high = strategy.surface_m2 * assumptions.unexpected_works_max_per_m2
 
     return {
-        "loyer_hc_mensuel": TriangularDist(rent * 0.90, rent, rent * 1.07),
-        "vacance_mois_par_an": TruncatedNormalDist(mean=1.2, std=0.8, low=0.0, high=6.0),
-        "croissance_loyer_annuelle_pct": TruncatedNormalDist(mean=1.0, std=0.6, low=0.0, high=3.0),
-        "inflation_charges_annuelle_pct": TruncatedNormalDist(mean=2.5, std=1.0, low=0.0, high=6.0),
+        "loyer_hc_mensuel": TriangularDist(
+            rent * assumptions.rent_multiplier_low,
+            rent * assumptions.rent_multiplier_mode,
+            rent * assumptions.rent_multiplier_high,
+        ),
+        "vacance_mois_par_an": TruncatedNormalDist(
+            mean=assumptions.vacancy_mean_months,
+            std=assumptions.vacancy_std_months,
+            low=0.0,
+            high=assumptions.vacancy_max_months,
+        ),
+        "croissance_loyer_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_rent_growth_mean_pct,
+            std=assumptions.annual_rent_growth_std_pct,
+            low=assumptions.annual_rent_growth_min_pct,
+            high=assumptions.annual_rent_growth_max_pct,
+        ),
+        "inflation_charges_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_charge_inflation_mean_pct,
+            std=assumptions.annual_charge_inflation_std_pct,
+            low=assumptions.annual_charge_inflation_min_pct,
+            high=assumptions.annual_charge_inflation_max_pct,
+        ),
         "travaux_imprevus_annuels": TriangularDist(0.0, works_mode, works_high),
-        "appreciation_bien_annuelle_pct": TruncatedNormalDist(mean=0.5, std=1.4, low=-3.0, high=4.0),
-        "decote_revente_pct": TruncatedNormalDist(mean=7.0, std=1.0, low=5.0, high=10.0),
+        "appreciation_bien_annuelle_pct": TruncatedNormalDist(
+            mean=assumptions.annual_appreciation_mean_pct,
+            std=assumptions.annual_appreciation_std_pct,
+            low=assumptions.annual_appreciation_min_pct,
+            high=assumptions.annual_appreciation_max_pct,
+        ),
+        "decote_revente_pct": TruncatedNormalDist(
+            mean=assumptions.resale_cost_mean_pct,
+            std=assumptions.resale_cost_std_pct,
+            low=assumptions.resale_cost_min_pct,
+            high=assumptions.resale_cost_max_pct,
+        ),
     }
 
 
@@ -204,22 +245,13 @@ def stable_seed(value: str, fallback: int = 42) -> int:
 
 def _status_after_analysis(
     current_status: str,
-    tri_p50: object,
-    coc_p50: object,
-    cf_p50: object,
+    summary: dict[str, object],
     targets: AnalysisTargets,
 ) -> str:
     if current_status in HUMAN_MANAGED_STATUSES:
         return current_status
-    meets_criteria = (
-        tri_p50 is not None
-        and coc_p50 is not None
-        and cf_p50 is not None
-        and float(tri_p50) >= targets.target_tri_median
-        and float(coc_p50) >= targets.target_coc
-        and float(cf_p50) >= targets.target_cashflow
-    )
-    return "a_verifier" if meets_criteria else "hors_criteres"
+    evaluation = evaluate_monte_carlo_summary(summary, targets)
+    return "a_verifier" if evaluation.meets_targets else "hors_criteres"
 
 
 def _analysis_diagnostics(
@@ -227,8 +259,13 @@ def _analysis_diagnostics(
     financing_policy: FinancingPolicy,
     criteria: SearchCriteria | None,
     solver_diagnostics: list[str],
+    profile_fingerprint: str,
 ) -> str:
-    parts = [f"source={run_source}", f"financement={financing_policy.describe()}"]
+    parts = [
+        f"source={run_source}",
+        f"profil={profile_fingerprint[:12]}",
+        f"financement={financing_policy.describe()}",
+    ]
     if criteria is not None:
         parts.append(f"solveur={criteria.status}")
         parts.extend(criteria.diagnostics)
