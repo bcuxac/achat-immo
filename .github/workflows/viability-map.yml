@@ -53,3 +53,10 @@ jobs:
             --properties "${{ github.event.inputs.properties }}" \
             --scenarios "${{ github.event.inputs.scenarios }}" \
             --workers 1
+
+      - name: Valider le rappel hors echantillon
+        run: |
+          uv run python scripts/validate_viability_map.py \
+            --properties 16 \
+            --scenarios 10 \
+            --min-recall 0.95

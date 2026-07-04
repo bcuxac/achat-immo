@@ -9,21 +9,22 @@ d'annonces, les biens ayant un potentiel eleve de rentabilite ajustee du risque.
 - [x] Unifier les seuils TRI, TRI P10, cash-on-cash, cash-flow et probabilite.
 - [x] Creer un plan d'experiences Sobol reproductible.
 - [x] Evaluer les biens hypothetiques sous des chocs economiques communs.
-- [ ] Mesurer la convergence et raffiner les frontieres.
+- [x] Mesurer le rappel sur un echantillon hors carte.
+- [ ] Raffiner adaptativement les frontieres et optimiser le cout de calcul.
 
 ## Lot 2 - Qualification rapide d'une annonce
 
-- [ ] Versionner et charger les artefacts de cartographie.
-- [ ] Projeter une annonce complete dans la carte.
-- [ ] Interroger des plages plausibles lorsque des donnees manquent.
-- [ ] Produire une qualification explicable et une distance a la frontiere.
+- [x] Versionner et charger les artefacts de cartographie.
+- [x] Projeter une annonce complete dans la carte.
+- [x] Interroger une annonce partielle sans inventer les donnees absentes.
+- [x] Produire une qualification explicable et une distance a la frontiere.
 
 ## Lot 3 - Integration du pipeline
 
-- [ ] Persister les runs de qualification rapide.
-- [ ] Reserver Monte Carlo et solveur aux annonces preselectionnees.
-- [ ] Afficher potentiel, confiance et raisons dans Streamlit.
-- [ ] Valider le taux de faux negatifs face aux analyses completes.
+- [x] Persister les runs de qualification rapide.
+- [x] Reserver Monte Carlo et solveur aux annonces preselectionnees.
+- [x] Afficher potentiel, confiance et raisons dans Streamlit.
+- [x] Valider le taux de faux negatifs face aux analyses completes.
 
 ## Lot 4 - Acquisition et extension
 

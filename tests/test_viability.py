@@ -6,6 +6,7 @@ from achat_immo.viability.scenarios import generate_common_scenario_shocks, scen
 from achat_immo.viability.profile_config import viability_config_from_profile
 from achat_immo.viability.artifact import deserialize_viability_config, serialize_viability_config
 from achat_immo.viability.query import PropertyObservation, qualify_observation
+from achat_immo.viability.validation import validate_viability_map
 
 
 def _config(**overrides) -> ViabilityMapConfig:
@@ -118,3 +119,16 @@ def test_requete_partielle_demande_un_enrichissement() -> None:
 
     assert result.qualification in {"a_enrichir", "carte_non_conclusive"}
     assert "loyer" in result.missing_fields
+
+
+def test_validation_hors_echantillon_mesure_le_rappel() -> None:
+    reference = build_viability_map(_config())
+    held_out = build_viability_map(_config(seed=456))
+
+    report = validate_viability_map(reference, held_out)
+
+    assert report.sample_count == 4
+    assert report.truly_viable == 4
+    assert report.recall is not None
+    assert 0 <= report.recall <= 1
+    assert report.false_negatives == report.truly_viable - report.true_positives
