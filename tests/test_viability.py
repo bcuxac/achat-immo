@@ -4,6 +4,8 @@ from achat_immo.viability import LocalMarketScope, ViabilityMapConfig, build_via
 from achat_immo.viability.sampling import sample_hypothetical_properties
 from achat_immo.viability.scenarios import generate_common_scenario_shocks, scenario_inputs_for_property
 from achat_immo.viability.profile_config import viability_config_from_profile
+from achat_immo.viability.artifact import deserialize_viability_config, serialize_viability_config
+from achat_immo.viability.query import PropertyObservation, qualify_observation
 
 
 def _config(**overrides) -> ViabilityMapConfig:
@@ -98,3 +100,21 @@ def test_configuration_carte_derive_du_profil_actif() -> None:
     assert config.investor.credit_rate_pct == 4.1
     assert config.property_count == 8
     assert config.profile_fingerprint == profile.fingerprint
+
+
+def test_configuration_carte_supporte_un_roundtrip_serialise() -> None:
+    config = _config()
+
+    restored = deserialize_viability_config(serialize_viability_config(config))
+
+    assert restored == config
+
+
+def test_requete_partielle_demande_un_enrichissement() -> None:
+    viability_map = build_viability_map(_config())
+    observation = PropertyObservation(surface_m2=30, price=80_000)
+
+    result = qualify_observation(viability_map, observation)
+
+    assert result.qualification in {"a_enrichir", "carte_non_conclusive"}
+    assert "loyer" in result.missing_fields

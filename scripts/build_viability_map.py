@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from achat_immo.city_profiles import legal_rent_caps_per_m2
-from achat_immo.storage import get_investment_profile, open_database
+from achat_immo.storage import get_investment_profile, open_database, save_viability_map
 from achat_immo.viability import (
     LocalMarketScope,
     ViabilityMapConfig,
@@ -27,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, help="Remplace le nombre de workers du profil.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--database", help="Base contenant le profil actif.")
+    parser.add_argument("--no-persist", action="store_true", help="N'enregistre pas la carte dans la base.")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/viability"))
     return parser
 
@@ -91,16 +92,17 @@ def main() -> None:
     conn = open_database(args.database)
     try:
         profile = get_investment_profile(conn)
+        config = default_city_config(
+            profile=profile,
+            properties=args.properties,
+            scenarios=args.scenarios,
+            workers=args.workers,
+            seed=args.seed,
+        )
+        viability_map = build_viability_map(config)
+        map_id = None if args.no_persist else save_viability_map(conn, viability_map)
     finally:
         conn.close()
-    config = default_city_config(
-        profile=profile,
-        properties=args.properties,
-        scenarios=args.scenarios,
-        workers=args.workers,
-        seed=args.seed,
-    )
-    viability_map = build_viability_map(config)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     city_slug = config.market.city.lower().replace(" ", "_")
     stem = f"{city_slug}_{config.version}_seed{config.seed}"
@@ -116,7 +118,8 @@ def main() -> None:
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
         f"Carte generee : {len(viability_map.points)} points, "
-        f"{viability_map.viable_count} robustement viables.\n{csv_path}\n{metadata_path}"
+        f"{viability_map.viable_count} robustement viables, "
+        f"base={'non persistee' if map_id is None else f'carte #{map_id}'}.\n{csv_path}\n{metadata_path}"
     )
 
 

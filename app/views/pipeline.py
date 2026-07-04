@@ -16,6 +16,7 @@ from achat_immo.storage import (
     DatabaseConnection,
     list_analysis_runs,
     list_extraction_runs,
+    list_qualification_runs,
     list_sourcing_queue,
     list_sourcing_runs,
 )
@@ -30,6 +31,8 @@ PRIORITY_COLUMNS = [
     "quartier",
     "prix_affiche",
     "prix_cible_recommande",
+    "qualification_rapide",
+    "ratio_voisins_viables",
     "ecart_prix_pct",
     "tri_p50",
     "cashflow_p50",
@@ -62,7 +65,15 @@ def pipeline_page(conn: DatabaseConnection, rows: list[dict[str, Any]]) -> None:
     analysis_runs = list_analysis_runs(conn)
     sourcing_queue = list_sourcing_queue(conn)
     sourcing_runs = list_sourcing_runs(conn, limit=10)
-    snapshot = build_cockpit_snapshot(rows, extraction_runs, analysis_runs, sourcing_queue, sourcing_runs)
+    qualification_runs = list_qualification_runs(conn)
+    snapshot = build_cockpit_snapshot(
+        rows,
+        extraction_runs,
+        analysis_runs,
+        sourcing_queue,
+        sourcing_runs,
+        qualification_runs,
+    )
 
     _render_attention_metrics(snapshot.totals, snapshot.funnel_counts)
     _render_priority_actions(snapshot.priority_items)

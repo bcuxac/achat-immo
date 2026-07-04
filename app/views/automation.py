@@ -18,6 +18,7 @@ from achat_immo.storage import (
     list_investment_profile_versions,
     list_sourcing_queue,
     list_sourcing_runs,
+    list_viability_maps,
     save_investment_profile,
 )
 from app.runtime_config import configured_database_url, configured_gemini_api_key
@@ -32,9 +33,31 @@ DEFAULT_ALLOWED_DOMAINS = "jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr"
 def automation_page(conn: DatabaseConnection, *, database_target: str) -> None:
     st.header("Parametres / Automatisation")
     _render_investment_profile(conn)
+    _render_viability_maps(conn)
     _render_runtime_status(database_target)
     _render_github_actions_status(conn)
     _render_sourcing_policy()
+
+
+def _render_viability_maps(conn: DatabaseConnection) -> None:
+    st.subheader("Cartes de viabilite")
+    rows = list_viability_maps(conn, limit=10)
+    if not rows:
+        st.warning(
+            "Aucune carte active. Le sourcing continuera en analyse approfondie sans prefiltrage. "
+            "Lance le workflow GitHub 'Cartographie de viabilite' ou le script local."
+        )
+        return
+    latest = rows[0]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ville", str(latest["city"]))
+    c2.metric("Points", int(latest["point_count"]))
+    c3.metric("Points viables", int(latest["viable_count"]))
+    c4.metric("Active", "oui" if latest["active"] else "non")
+    if int(latest["viable_count"]) == 0:
+        st.warning("Cette carte ne contient aucun point viable : elle est non conclusive et ne rejettera aucune annonce.")
+    with st.expander("Historique des cartes", expanded=False):
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 def _render_investment_profile(conn: DatabaseConnection) -> None:

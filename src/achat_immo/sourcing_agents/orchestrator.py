@@ -26,11 +26,14 @@ from achat_immo.sourcing_agents.models import CandidateProperty
 from achat_immo.storage import (
     DatabaseConnection,
     find_annonce_id_by_url,
+    get_active_viability_map,
     normalize_source_url,
     save_analysis_run,
     save_annonce,
     save_extraction_run,
+    save_qualification_run,
 )
+from achat_immo.viability.query import PropertyObservation, qualify_observation
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +226,39 @@ class SourcingOrchestrator:
         
         candidate = self.llm_agent.extract_from_text(text, source_url=final_url)
         existing_annonce_id = find_annonce_id_by_url(conn, final_url)
+        active_map = get_active_viability_map(conn, candidate.ville, self.profile.fingerprint)
+        fast_qualification = None
+        map_id = None
+        if active_map is not None:
+            map_id, viability_map = active_map
+            fast_qualification = qualify_observation(
+                viability_map,
+                PropertyObservation(
+                    surface_m2=candidate.surface,
+                    price=candidate.prix,
+                    monthly_rent=candidate.loyer_estime,
+                    annual_charges=(
+                        candidate.charges_mensuelles * 12 if candidate.charges_mensuelles is not None else None
+                    ),
+                    property_tax=candidate.taxe_fonciere,
+                    initial_works=candidate.travaux_visibles,
+                ),
+            )
+        if fast_qualification is not None and fast_qualification.qualification in {
+            "non_viable",
+            "a_enrichir",
+        }:
+            return self._save_prefiltered_candidate(
+                conn=conn,
+                candidate=candidate,
+                existing_annonce_id=existing_annonce_id,
+                source_url=url,
+                final_url=final_url,
+                text=text,
+                extraction_warning=extraction_warning,
+                map_id=map_id,
+                fast_qualification=fast_qualification,
+            )
         raw_strategy = self._map_candidate_to_strategy(candidate)
         financing_policy = FinancingPolicy.from_strategy(raw_strategy)
         strategy = financing_policy.apply(raw_strategy)
@@ -367,5 +403,92 @@ class SourcingOrchestrator:
                     + (" | ".join(solver.last_diagnostics) or "Aucun prix cible viable.")
                 ),
             ),
+        )
+        if fast_qualification is not None:
+            save_qualification_run(
+                conn,
+                annonce_id=annonce_id,
+                map_id=map_id,
+                profile_hash=self.profile.fingerprint,
+                qualification=fast_qualification.qualification,
+                viable_neighbor_ratio=fast_qualification.viable_neighbor_ratio,
+                distance_to_viable=fast_qualification.distance_to_viable,
+                estimated_max_price=fast_qualification.estimated_max_price,
+                missing_fields=fast_qualification.missing_fields,
+                reasons=fast_qualification.reasons,
+            )
+        return annonce_id
+
+    def _save_prefiltered_candidate(
+        self,
+        *,
+        conn: DatabaseConnection,
+        candidate: CandidateProperty,
+        existing_annonce_id: int | None,
+        source_url: str,
+        final_url: str,
+        text: str,
+        extraction_warning: str,
+        map_id: int | None,
+        fast_qualification,
+    ) -> int:
+        strategy = self._map_candidate_to_strategy(candidate)
+        status = "donnees_insuffisantes" if fast_qualification.qualification == "a_enrichir" else "hors_criteres"
+        notes = (
+            f"Qualification rapide: {fast_qualification.qualification}\n"
+            f"Raisons: {', '.join(fast_qualification.reasons)}\n"
+            f"Donnees manquantes: {', '.join(fast_qualification.missing_fields)}\n"
+            f"Profil: {self.profile.fingerprint[:12]}"
+        )
+        annonce_id = save_annonce(
+            conn,
+            AnnonceRecord(
+                id=existing_annonce_id,
+                url=candidate.url,
+                ville=candidate.ville,
+                quartier=candidate.quartier,
+                surface_m2=candidate.surface,
+                prix_affiche=candidate.prix,
+                dpe=candidate.dpe,
+                statut=status,
+                notes=notes,
+                type_bien=TypeBien.T2,
+            ),
+            HypothesesAchatRecord(
+                frais_notaire_estimes=strategy.frais_notaire_estimes,
+                travaux_estimes=strategy.travaux_initiaux,
+                loyer_hc_mensuel=strategy.loyer_hc_mensuel,
+                charges_copro_annuelles=strategy.charges_copro_annuelles,
+                taxe_fonciere=strategy.taxe_fonciere,
+                mode_location=strategy.mode_location,
+            ),
+        )
+        save_extraction_run(
+            conn,
+            ExtractionRunRecord(
+                annonce_id=annonce_id,
+                source_url=source_url,
+                final_url=final_url,
+                status="success_with_warning" if extraction_warning else "success",
+                model="gemini-2.5-flash",
+                input_chars=len(text),
+                raw_content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                extracted_source=candidate.source,
+                red_flags=", ".join(candidate.red_flags),
+                missing_fields=", ".join(candidate.donnees_manquantes),
+                error_message=extraction_warning,
+            ),
+        )
+        save_qualification_run(
+            conn,
+            annonce_id=annonce_id,
+            map_id=map_id,
+            profile_hash=self.profile.fingerprint,
+            qualification=fast_qualification.qualification,
+            viable_neighbor_ratio=fast_qualification.viable_neighbor_ratio,
+            distance_to_viable=fast_qualification.distance_to_viable,
+            estimated_max_price=fast_qualification.estimated_max_price,
+            missing_fields=fast_qualification.missing_fields,
+            reasons=fast_qualification.reasons,
         )
         return annonce_id

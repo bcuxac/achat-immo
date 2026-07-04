@@ -46,10 +46,16 @@ from achat_immo.storage_records import (
     SourcingRunRecord,
 )
 from achat_immo.storage_schema import init_db
+from achat_immo.viability.artifact import deserialize_viability_config, serialize_viability_config
+from achat_immo.viability.models import HypotheticalProperty, ViabilityMap, ViabilityPoint
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _optional_float(value: Any) -> float | None:
+    return None if value is None else float(value)
 
 
 def normalize_source_url(url: str) -> str:
@@ -408,6 +414,192 @@ def list_investment_profile_versions(
         """,
         (profile_key, limit),
     ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) -> int:
+    """Persiste une carte et l'active pour sa ville et son profil."""
+
+    config = viability_map.config
+    conn.execute(
+        "UPDATE viability_maps SET active = 0 WHERE city = ? AND profile_hash = ?",
+        (config.market.city, config.profile_fingerprint),
+    )
+    insert_sql = """
+        INSERT INTO viability_maps (
+            date_creation, city, profile_hash, map_version, config_json,
+            point_count, viable_count, active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            _now_iso(),
+            config.market.city,
+            config.profile_fingerprint,
+            config.version,
+            serialize_viability_config(config),
+            len(viability_map.points),
+            viability_map.viable_count,
+        ),
+    )
+    map_id = int(cursor.fetchone()["id"]) if conn.is_postgres else int(cursor.lastrowid)
+    conn.executemany(
+        """
+        INSERT INTO viability_points (
+            map_id, sample_id, surface_m2, price, monthly_rent, annual_charges,
+            property_tax, initial_works, equity, total_project_cost,
+            legal_rent_cap_per_m2, qualification, reasons, tri_median, tri_p10,
+            cash_on_cash_median, prudent_monthly_cashflow,
+            positive_cashflow_probability, valid_scenarios
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                map_id,
+                point.property.sample_id,
+                point.property.surface_m2,
+                point.property.price,
+                point.property.monthly_rent,
+                point.property.annual_charges,
+                point.property.property_tax,
+                point.property.initial_works,
+                point.property.equity,
+                point.property.total_project_cost,
+                point.property.legal_rent_cap_per_m2,
+                point.qualification,
+                ",".join(point.reasons),
+                point.tri_median,
+                point.tri_p10,
+                point.cash_on_cash_median,
+                point.prudent_monthly_cashflow,
+                point.positive_cashflow_probability,
+                point.valid_scenarios,
+            )
+            for point in viability_map.points
+        ],
+    )
+    conn.commit()
+    return map_id
+
+
+def get_active_viability_map(
+    conn: DatabaseConnection,
+    city: str,
+    profile_hash: str,
+) -> tuple[int, ViabilityMap] | None:
+    row = conn.execute(
+        """
+        SELECT * FROM viability_maps
+        WHERE city = ? AND profile_hash = ? AND active = 1
+        ORDER BY id DESC LIMIT 1
+        """,
+        (city, profile_hash),
+    ).fetchone()
+    if row is None:
+        return None
+    map_id = int(row["id"])
+    config = deserialize_viability_config(str(row["config_json"]))
+    point_rows = conn.execute(
+        "SELECT * FROM viability_points WHERE map_id = ? ORDER BY sample_id",
+        (map_id,),
+    ).fetchall()
+    points = tuple(_viability_point_from_row(point_row) for point_row in point_rows)
+    return map_id, ViabilityMap(config=config, points=points)
+
+
+def list_viability_maps(conn: DatabaseConnection, *, limit: int = 20) -> list[dict[str, Any]]:
+    if limit <= 0:
+        raise ValueError("La limite doit etre strictement positive.")
+    rows = conn.execute(
+        "SELECT * FROM viability_maps ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _viability_point_from_row(row: Mapping[str, Any]) -> ViabilityPoint:
+    return ViabilityPoint(
+        property=HypotheticalProperty(
+            sample_id=int(row["sample_id"]),
+            surface_m2=float(row["surface_m2"]),
+            price=float(row["price"]),
+            monthly_rent=float(row["monthly_rent"]),
+            annual_charges=float(row["annual_charges"]),
+            property_tax=float(row["property_tax"]),
+            initial_works=float(row["initial_works"]),
+            equity=float(row["equity"]),
+            total_project_cost=float(row["total_project_cost"]),
+            legal_rent_cap_per_m2=(
+                float(row["legal_rent_cap_per_m2"]) if row["legal_rent_cap_per_m2"] is not None else None
+            ),
+        ),
+        qualification=str(row["qualification"]),
+        reasons=tuple(part for part in str(row["reasons"]).split(",") if part),
+        tri_median=_optional_float(row["tri_median"]),
+        tri_p10=_optional_float(row["tri_p10"]),
+        cash_on_cash_median=_optional_float(row["cash_on_cash_median"]),
+        prudent_monthly_cashflow=_optional_float(row["prudent_monthly_cashflow"]),
+        positive_cashflow_probability=_optional_float(row["positive_cashflow_probability"]),
+        valid_scenarios=int(row["valid_scenarios"]),
+    )
+
+
+def save_qualification_run(
+    conn: DatabaseConnection,
+    *,
+    annonce_id: int,
+    map_id: int | None,
+    profile_hash: str,
+    qualification: str,
+    viable_neighbor_ratio: float | None,
+    distance_to_viable: float | None,
+    estimated_max_price: float | None,
+    missing_fields: Iterable[str] = (),
+    reasons: Iterable[str] = (),
+) -> int:
+    insert_sql = """
+        INSERT INTO qualification_runs (
+            annonce_id, map_id, date_run, profile_hash, qualification,
+            viable_neighbor_ratio, distance_to_viable, estimated_max_price,
+            missing_fields, reasons
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            annonce_id,
+            map_id,
+            _now_iso(),
+            profile_hash,
+            qualification,
+            viable_neighbor_ratio,
+            distance_to_viable,
+            estimated_max_price,
+            ",".join(missing_fields),
+            ",".join(reasons),
+        ),
+    )
+    run_id = int(cursor.fetchone()["id"]) if conn.is_postgres else int(cursor.lastrowid)
+    conn.commit()
+    return run_id
+
+
+def list_qualification_runs(
+    conn: DatabaseConnection,
+    annonce_id: int | None = None,
+) -> list[dict[str, Any]]:
+    if annonce_id is None:
+        rows = conn.execute("SELECT * FROM qualification_runs ORDER BY id DESC").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM qualification_runs WHERE annonce_id = ? ORDER BY id DESC",
+            (annonce_id,),
+        ).fetchall()
     return [dict(row) for row in rows]
 
 

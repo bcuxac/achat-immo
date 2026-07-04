@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from achat_immo.investment_profile import InvestmentProfile
+from achat_immo.sourcing_agents.models import CandidateProperty
+from achat_immo.sourcing_agents.orchestrator import SourcingOrchestrator
 from achat_immo.sourcing_agents.content_guard import ContentAccessDecision, SourcingAccessBlockedError
 from achat_immo.storage import (
     AnnonceRecord,
@@ -7,9 +10,12 @@ from achat_immo.storage import (
     enqueue_sourcing_url,
     list_sourcing_queue,
     list_sourcing_runs,
+    list_analysis_runs,
+    list_qualification_runs,
     open_database,
     save_annonce,
 )
+from achat_immo.viability.query import FastQualification
 from scripts.run_orchestrator import process_pending_queue, read_url_file
 
 
@@ -21,6 +27,55 @@ def test_read_url_file_ignore_vides_et_commentaires(tmp_path: Path) -> None:
     )
 
     assert read_url_file(path) == ["https://example.test/a", "https://example.test/b"]
+
+
+def test_prefiltre_sauvegarde_sans_lancer_analyse_approfondie(tmp_path: Path) -> None:
+    conn = open_database(tmp_path / "achat.sqlite")
+    orchestrator = SourcingOrchestrator.__new__(SourcingOrchestrator)
+    orchestrator.profile = InvestmentProfile()
+    candidate = CandidateProperty(
+        source="test",
+        url="https://example.test/bien",
+        ville="Grenoble",
+        quartier="Centre",
+        prix=100_000,
+        surface=35,
+        charges_mensuelles=None,
+        taxe_fonciere=None,
+        dpe="D",
+        etage=None,
+        ascenseur=None,
+        loyer_estime=None,
+        confiance_loyer="basse",
+        travaux_visibles=None,
+        red_flags=[],
+        donnees_manquantes=["loyer", "charges", "taxe fonciere"],
+    )
+    qualification = FastQualification(
+        qualification="a_enrichir",
+        viable_neighbor_ratio=0.4,
+        distance_to_viable=0.1,
+        estimated_max_price=95_000,
+        missing_fields=("loyer", "charges"),
+        reasons=("donnees_manquantes",),
+    )
+
+    annonce_id = orchestrator._save_prefiltered_candidate(
+        conn=conn,
+        candidate=candidate,
+        existing_annonce_id=None,
+        source_url=candidate.url,
+        final_url=candidate.url,
+        text="annonce test",
+        extraction_warning="",
+        map_id=None,
+        fast_qualification=qualification,
+    )
+
+    assert list_analysis_runs(conn, annonce_id) == []
+    runs = list_qualification_runs(conn, annonce_id)
+    assert runs[0]["qualification"] == "a_enrichir"
+    assert runs[0]["estimated_max_price"] == 95_000
 
 
 def test_process_pending_queue_met_a_jour_les_statuts(tmp_path: Path) -> None:

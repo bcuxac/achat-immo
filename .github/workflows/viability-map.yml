@@ -1,0 +1,55 @@
+name: Cartographie de viabilite
+
+on:
+  workflow_dispatch:
+    inputs:
+      properties:
+        description: "Nombre de biens hypothetiques"
+        required: false
+        default: "64"
+      scenarios:
+        description: "Scenarios communs par bien"
+        required: false
+        default: "20"
+
+concurrency:
+  group: viability-map
+  cancel-in-progress: false
+
+jobs:
+  build-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer les dependances
+        run: uv sync --frozen
+
+      - name: Verifier la base persistante
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::error::DATABASE_URL est requis pour persister la carte."
+            exit 1
+          fi
+
+      - name: Construire et activer la carte
+        run: |
+          uv run python scripts/build_viability_map.py \
+            --properties "${{ github.event.inputs.properties }}" \
+            --scenarios "${{ github.event.inputs.scenarios }}" \
+            --workers 1
