@@ -6,10 +6,14 @@ from google import genai
 from typing import Optional, List
 import os
 import json
+from pathlib import Path
+import re
 from shutil import which
+from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 
+from achat_immo.jinka_collect import DEFAULT_JINKA_STORAGE_STATE
 from achat_immo.sourcing_agents.models import CandidateProperty
 
 
@@ -20,6 +24,16 @@ CHROMIUM_CONTAINER_ARGS = [
     "--disable-dev-shm-usage",
     "--disable-gpu",
 ]
+JINKA_HOSTS = {"jinka.fr", "www.jinka.fr"}
+CONSENT_BUTTON_PATTERNS = (
+    "Continuer sans accepter",
+    "Tout refuser",
+    "Refuser",
+    "Accepter et fermer",
+    "Tout accepter",
+    "Accepter",
+    "J'accepte",
+)
 
 
 def resolve_chromium_executable() -> str | None:
@@ -42,6 +56,65 @@ def chromium_launch_options() -> dict[str, object]:
     if executable_path:
         options["executable_path"] = executable_path
     return options
+
+
+def browser_context_options(url: str) -> dict[str, object]:
+    """Retourne les options de contexte Playwright adaptees a l'URL chargee."""
+
+    options: dict[str, object] = {
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "viewport": {"width": 1280, "height": 720},
+    }
+    storage_state_path = jinka_storage_state_path_for_url(url)
+    if storage_state_path is not None:
+        options["storage_state"] = str(storage_state_path)
+    return options
+
+
+def jinka_storage_state_path_for_url(url: str) -> Path | None:
+    """Retourne le fichier de session Jinka a reutiliser pour une fiche Jinka."""
+
+    hostname = (urlsplit(url).hostname or "").lower()
+    if hostname not in JINKA_HOSTS:
+        return None
+    configured = os.environ.get("JINKA_STORAGE_STATE_PATH", "").strip()
+    storage_state_path = Path(configured) if configured else DEFAULT_JINKA_STORAGE_STATE
+    return storage_state_path if storage_state_path.exists() else None
+
+
+def dismiss_consent_wall(page) -> bool:  # noqa: ANN001
+    """Ferme une banniere de consentement si elle masque le contenu."""
+
+    for label in CONSENT_BUTTON_PATTERNS:
+        label_pattern = re.compile(re.escape(label), re.IGNORECASE)
+        if _try_click_locator(page.get_by_role("button", name=label_pattern)):
+            return True
+        if _try_click_locator(page.get_by_role("link", name=label_pattern)):
+            return True
+        if _try_click_locator(page.get_by_text(label_pattern)):
+            return True
+    for selector in (
+        "button.iubenda-cs-reject-btn",
+        "button.iubenda-cs-accept-btn",
+        ".iubenda-cs-reject-btn",
+        ".iubenda-cs-accept-btn",
+    ):
+        if _try_click_locator(page.locator(selector)):
+            return True
+    return False
+
+
+def _try_click_locator(locator) -> bool:  # noqa: ANN001
+    try:
+        if locator.count() == 0:
+            return False
+        locator.first.click(timeout=1200)
+        return True
+    except Exception:
+        return False
 
 
 class LLMPropertySchema(BaseModel):
@@ -77,10 +150,7 @@ class LLMSourcingAgent:
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(**chromium_launch_options())
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={"width": 1280, "height": 720}
-                )
+                context = browser.new_context(**browser_context_options(url))
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
                 
@@ -92,7 +162,17 @@ class LLMSourcingAgent:
                     pass
                 
                 # Attendre un peu plus pour les SPAs recalcitrantes si besoin, ou scroll down
+                dismissed_consent = dismiss_consent_wall(page)
+                if dismissed_consent:
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                    except PlaywrightTimeoutError:
+                        pass
+                    storage_state_path = jinka_storage_state_path_for_url(url)
+                    if storage_state_path is not None:
+                        context.storage_state(path=str(storage_state_path))
                 html_content = page.content()
+                context.close()
                 browser.close()
                 
             # Nettoyage avec BeautifulSoup pour ne garder que le texte visible (et les attributs href des liens)
