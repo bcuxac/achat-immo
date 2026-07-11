@@ -213,11 +213,13 @@ CITY_PROFILES: dict[str, CityProfile] = {
             "https://www.service-public.fr/simulateur/calcul/zones-tendues",
             "https://www.service-public.fr/particuliers/vosdroits/F1314",
             "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000047998521",
+            "https://www.nimes.fr/mon-quotidien/urbanisme/autorisations-durbanisme/permis-de-louer",
         ),
         note=(
             "Zone tendue depuis le decret n° 2023-822 : absence de grille locale de loyers de "
             "reference majores. Le loyer precedent et les exceptions de relocation sont requis "
-            "pour verifier le loyer legal."
+            "pour verifier le loyer legal. Une autorisation prealable de mise en location est "
+            "egalement requise dans les perimetres municipaux de Pissevin et de la galerie Wagner."
         ),
     ),
 }

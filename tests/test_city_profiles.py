@@ -92,3 +92,4 @@ def test_nimes_exige_le_loyer_precedent_sans_grille_locale() -> None:
     assert profile.rent_control_kind == RentControlKind.ZONE_TENDUE_RELOCATION
     assert rent_reference_records("Nimes", ModeLocation.MEUBLEE) == ()
     assert "loyer precedent" in profile.note.lower()
+    assert "autorisation prealable" in profile.note.lower()
