@@ -17,6 +17,7 @@ from achat_immo.storage import (
     enqueue_sourcing_url,
     get_sourcing_queue_item,
     get_investment_profile,
+    list_jinka_alerts,
     list_sourcing_queue,
     mark_sourcing_url_pending,
     mark_sourcing_url_skipped,
@@ -41,11 +42,19 @@ QUEUE_VIEW_FILTERS = {
     "Ignorees": ("skipped",),
     "Toutes": QUEUE_STATUSES,
 }
+JINKA_ALERT_STATUS_LABELS = {
+    "pending": "A developper",
+    "processing": "En cours",
+    "done": "Developpee",
+    "failed": "Echec",
+    "blocked": "Session bloquee",
+}
 
 
 def sourcing_queue_page(conn: DatabaseConnection) -> None:
     st.header("Importer des URLs")
     _render_enqueue_form(conn)
+    _render_jinka_alerts_overview(conn)
 
     rows = list_sourcing_queue(conn)
     if not rows:
@@ -115,6 +124,19 @@ def _render_status_metrics(rows: list[dict[str, Any]]) -> None:
     cols = st.columns(len(visible_statuses))
     for col, status in zip(cols, visible_statuses, strict=True):
         col.metric(QUEUE_STATUS_LABELS[status], counts.get(status, 0))
+
+
+def _render_jinka_alerts_overview(conn: DatabaseConnection) -> None:
+    rows = list_jinka_alerts(conn)
+    if not rows:
+        return
+    counts = Counter(str(row["status"]) for row in rows)
+    with st.expander("Alertes Jinka", expanded=bool(counts.get("pending") or counts.get("blocked"))):
+        metric_statuses = ("pending", "processing", "failed", "blocked", "done")
+        cols = st.columns(len(metric_statuses))
+        for col, status in zip(cols, metric_statuses, strict=True):
+            col.metric(JINKA_ALERT_STATUS_LABELS[status], counts.get(status, 0))
+        st.dataframe(_jinka_alerts_dataframe(rows), hide_index=True, width="stretch")
 
 
 def _render_selected_item_actions(conn: DatabaseConnection, item: dict[str, Any]) -> None:
@@ -193,6 +215,22 @@ def _queue_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "annonce": f"#{row['annonce_id']}" if row.get("annonce_id") else "",
                 "probleme": row.get("last_error") or "",
                 "dernier_traitement": row.get("last_processed_at") or "",
+            }
+            for row in rows
+        ]
+    )
+
+
+def _jinka_alerts_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "etat": JINKA_ALERT_STATUS_LABELS.get(str(row.get("status") or ""), str(row.get("status") or "")),
+                "alerte": row.get("alert_id") or "",
+                "source": row.get("source") or "",
+                "dernier_signal": row.get("last_seen_at") or "",
+                "annonces_detectees": row.get("discovered_ads_count") or 0,
+                "probleme": row.get("last_error") or "",
             }
             for row in rows
         ]

@@ -19,6 +19,7 @@ from achat_immo.schemas import (
     AnnonceRecordSchema,
     ExtractionRunRecordSchema,
     HypothesesAchatRecordSchema,
+    JinkaAlertRecordSchema,
     SimulationResultRowSchema,
     SourcingQueueRecordSchema,
     SourcingRunRecordSchema,
@@ -43,6 +44,7 @@ from achat_immo.storage_records import (
     AnnonceRecord,
     ExtractionRunRecord,
     HypothesesAchatRecord,
+    JinkaAlertRecord,
     SourcingQueueRecord,
     SourcingRunRecord,
 )
@@ -83,6 +85,17 @@ def normalize_source_url(url: str) -> str:
         query = ""
 
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def normalize_jinka_alert_id(alert_id: str) -> str:
+    """Normalise l'identifiant opaque d'une alerte Jinka."""
+
+    value = alert_id.strip()
+    if not value:
+        raise ValueError("L'identifiant d'alerte Jinka ne peut pas etre vide.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", value):
+        raise ValueError(f"Identifiant d'alerte Jinka invalide: {value}")
+    return value
 
 
 def open_database(db_path: str | Path | None = DEFAULT_DB_PATH) -> DatabaseConnection:
@@ -1152,6 +1165,207 @@ def list_sourcing_runs(conn: DatabaseConnection, limit: int = 50) -> list[dict[s
     return [dict(row) for row in rows]
 
 
+def enqueue_jinka_alert(
+    conn: DatabaseConnection,
+    alert_id: str,
+    *,
+    source_url: str = "",
+    source: str = "jinka_email",
+    priority: int = 0,
+    observed_at: str = "",
+    notification_count: int | None = None,
+) -> int:
+    """Ajoute ou rafraichit une alerte Jinka a developper en annonces."""
+
+    normalized_alert_id = normalize_jinka_alert_id(alert_id)
+    now = _now_iso()
+    seen_at = observed_at or now
+    existing = conn.execute(
+        "SELECT * FROM jinka_alerts WHERE alert_id = ?",
+        (normalized_alert_id,),
+    ).fetchone()
+    if existing is not None:
+        row = dict(existing)
+        last_seen_at = str(row["last_seen_at"] or "")
+        is_new_notification = bool(seen_at and seen_at > last_seen_at)
+        should_requeue = row["status"] in {"failed", "blocked"} or (
+            row["status"] == "done" and is_new_notification
+        )
+        status = "pending" if should_requeue else row["status"]
+        last_error = "" if should_requeue else row["last_error"]
+        next_source_url = source_url or row["source_url"]
+        next_seen_at = max(last_seen_at, seen_at)
+        next_count = notification_count if notification_count is not None else row["last_notification_count"]
+        conn.execute(
+            """
+            UPDATE jinka_alerts
+            SET date_update = ?, source_url = ?, source = ?, status = ?,
+                priority = ?, last_notification_count = ?, last_seen_at = ?,
+                last_error = ?
+            WHERE id = ?
+            """,
+            (
+                now,
+                next_source_url,
+                source,
+                status,
+                max(int(row["priority"]), priority),
+                next_count,
+                next_seen_at,
+                last_error,
+                row["id"],
+            ),
+        )
+        conn.commit()
+        return int(row["id"])
+
+    record = JinkaAlertRecordSchema.model_validate(
+        JinkaAlertRecord(
+            alert_id=normalized_alert_id,
+            date_creation=now,
+            date_update=now,
+            source_url=source_url,
+            source=source,
+            priority=priority,
+            last_notification_count=notification_count,
+            last_seen_at=seen_at,
+        )
+    ).model_dump()
+    insert_sql = """
+        INSERT INTO jinka_alerts (
+            date_creation, date_update, alert_id, source_url, source, status,
+            priority, attempts, last_notification_count, last_seen_at,
+            last_collected_at, discovered_ads_count, last_error
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    if conn.is_postgres:
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (
+            record["date_creation"],
+            record["date_update"],
+            record["alert_id"],
+            record["source_url"],
+            record["source"],
+            record["status"],
+            record["priority"],
+            record["attempts"],
+            record["last_notification_count"],
+            record["last_seen_at"],
+            record["last_collected_at"],
+            record["discovered_ads_count"],
+            record["last_error"],
+        ),
+    )
+    if conn.is_postgres:
+        row = cursor.fetchone()
+        jinka_alert_id = int(row["id"])
+    else:
+        jinka_alert_id = int(cursor.lastrowid)
+    conn.commit()
+    return jinka_alert_id
+
+
+def list_jinka_alerts(conn: DatabaseConnection, status: str | None = None) -> list[dict[str, Any]]:
+    if status is None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM jinka_alerts
+            ORDER BY priority DESC, id ASC
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM jinka_alerts
+            WHERE status = ?
+            ORDER BY priority DESC, id ASC
+            """,
+            (status,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_pending_jinka_alerts(conn: DatabaseConnection, limit: int = 20) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM jinka_alerts
+        WHERE status = 'pending'
+        ORDER BY priority DESC, id ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_jinka_alert(conn: DatabaseConnection, jinka_alert_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM jinka_alerts WHERE id = ?",
+        (jinka_alert_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def mark_jinka_alert_processing(conn: DatabaseConnection, jinka_alert_id: int) -> None:
+    conn.execute(
+        """
+        UPDATE jinka_alerts
+        SET status = 'processing', attempts = attempts + 1, date_update = ?
+        WHERE id = ?
+        """,
+        (_now_iso(), jinka_alert_id),
+    )
+    conn.commit()
+
+
+def mark_jinka_alert_success(conn: DatabaseConnection, jinka_alert_id: int, discovered_ads_count: int) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE jinka_alerts
+        SET status = 'done', last_error = '', last_collected_at = ?,
+            discovered_ads_count = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (now, discovered_ads_count, now, jinka_alert_id),
+    )
+    conn.commit()
+
+
+def mark_jinka_alert_failure(conn: DatabaseConnection, jinka_alert_id: int, error_message: str) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE jinka_alerts
+        SET status = 'failed', last_error = ?, last_collected_at = ?,
+            date_update = ?
+        WHERE id = ?
+        """,
+        (error_message[:1000], now, now, jinka_alert_id),
+    )
+    conn.commit()
+
+
+def mark_jinka_alert_blocked(conn: DatabaseConnection, jinka_alert_id: int, reason: str) -> None:
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE jinka_alerts
+        SET status = 'blocked', last_error = ?, last_collected_at = ?,
+            date_update = ?
+        WHERE id = ?
+        """,
+        (reason[:1000], now, now, jinka_alert_id),
+    )
+    conn.commit()
+
+
 def mark_sourcing_url_processing(conn: DatabaseConnection, queue_id: int) -> None:
     conn.execute(
         """
@@ -1230,6 +1444,11 @@ def reset_identity_sequences(conn: DatabaseConnection) -> None:
         "analysis_runs",
         "sourcing_queue",
         "sourcing_runs",
+        "jinka_alerts",
+        "investment_profile_versions",
+        "viability_maps",
+        "viability_points",
+        "qualification_runs",
     ):
         row = conn.execute(f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {table}").fetchone()
         max_id = int(row["max_id"])

@@ -64,6 +64,7 @@ data/*.sqlite
 data/*.sqlite-journal
 data/*.db
 data/*.db-journal
+data/jinka_storage_state.json
 outputs/
 
 # Flask stuff:
@@ -202,4 +203,3 @@ cython_debug/
 # Simulation Outputs
 params_mass_sim_*.json
 resultats_mass_sim_*.csv
-

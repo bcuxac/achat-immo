@@ -150,10 +150,11 @@ valeurs encore a traiter est maintenu dans `docs/configuration_audit.md`.
 
 ### Acquisition des annonces Jinka
 
-L'acquisition est separee en deux etapes : les alertes Jinka decouvrent les
-URLs, puis le pipeline existant charge et extrait uniquement ces fiches. Les
-parametres `alert_id`, `utm_*` et `from` sont retires de l'identite d'une fiche
-afin qu'une meme annonce ne soit jamais ajoutee plusieurs fois.
+L'acquisition est separee en trois etapes : les emails Jinka signalent une
+alerte, une session Jinka authentifiee developpe cette alerte en URLs
+d'annonces, puis le pipeline existant charge et extrait uniquement ces fiches.
+Les parametres `alert_id`, `utm_*` et `from` sont retires de l'identite d'une
+fiche afin qu'une meme annonce ne soit jamais ajoutee plusieurs fois.
 
 Pour charger un historique initial, exporter les messages au format EML/MBOX,
 ou fournir un CSV/TXT contenant les liens, puis lancer :
@@ -163,16 +164,37 @@ uv run python scripts/ingest_source_archive.py chemin/vers/export.mbox
 ```
 
 Le script accepte aussi un repertoire d'EML et les exports MBOX d'Apple Mail.
-Il ne demande pas de recopier les caracteristiques des biens : seule l'URL
-Jinka est necessaire.
+Il ne demande pas de recopier les caracteristiques des biens : un lien
+d'alerte Jinka ou une URL de fiche suffit. Pour les emails Jinka recents, le
+script peut suivre le bouton "Voir dans l'application Jinka" avec
+`--resolve-tracked-links` afin de retrouver l'`alert_id` cache derriere
+SendGrid. Ce suivi ne concerne pas le lien de desactivation.
+
+Pour autoriser la collecte authentifiee des annonces visibles dans Jinka,
+sauvegarder une session locale :
+
+```bash
+uv run python scripts/setup_jinka_session.py
+```
+
+Le fichier `data/jinka_storage_state.json` contient des cookies et reste ignore
+par Git. Pour GitHub Actions, l'encoder en base64 et le stocker dans le secret
+`JINKA_STORAGE_STATE_B64`. La collecte des alertes en attente peut ensuite etre
+executee localement avec :
+
+```bash
+uv run python scripts/collect_jinka_alert_ads.py --limit 10
+```
 
 Le workflow `Sourcing immobilier` s'execute a 05:17 et 17:17 UTC. Il peut lire
 une boite dediee en IMAP, sans marquer les messages comme lus, avec les secrets
 GitHub `SOURCING_IMAP_HOST`, `SOURCING_IMAP_USERNAME` et
 `SOURCING_IMAP_PASSWORD`. Les variables facultatives sont
 `SOURCING_IMAP_PORT` (993), `SOURCING_IMAP_MAILBOX` (INBOX),
-`SOURCING_IMAP_SENDER` et `SOURCING_IMAP_LOOKBACK_DAYS` (2). Pour le chargement
-initial, declencher manuellement le workflow avec 90 jours de recul.
+`SOURCING_IMAP_SENDER` et `SOURCING_IMAP_LOOKBACK_DAYS` (2). Si
+`JINKA_STORAGE_STATE_B64` est defini, le workflow developpe aussi les alertes
+Jinka en URLs avant de traiter la queue. Pour le chargement initial, declencher
+manuellement le workflow avec 90 jours de recul.
 
 ## Deploiement gratuit pour deux utilisateurs
 

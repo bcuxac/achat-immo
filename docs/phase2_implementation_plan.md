@@ -26,6 +26,8 @@ affaiblir la qualite des decisions financieres.
 - [x] Resume persistant des runs de sourcing consultable dans Streamlit.
 - [x] Workflow GitHub Actions planifie et declenchable manuellement.
 - [x] Import idempotent des alertes Jinka depuis CSV, texte, EML, MBOX ou IMAP.
+- [x] Stockage separe des `alert_id` Jinka avant developpement en URLs d'annonces.
+- [x] Collecte authentifiee des alertes Jinka via session Playwright sauvegardee.
 - [x] Canonicalisation des liens Jinka pour supprimer les identifiants d'alerte et de campagne.
 - [x] Cockpit Streamlit minimal pour consulter les nouveaux runs.
 - [x] Funnel decisionnel et priorites d'annonces dans Streamlit.
@@ -67,8 +69,10 @@ Objectif : alimenter le pipeline sans construire un scraper fragile comme point
 unique de defaillance.
 
 - Commencer par une file d'URLs, alertes mail ou exports simples.
-- Utiliser les alertes Jinka comme canal de decouverte et reserver Playwright a
-  l'extraction des fiches deja identifiees.
+- Utiliser les emails Jinka comme declencheurs d'`alert_id`, puis une session
+  Jinka authentifiee pour developper ces alertes en fiches `/ad/<uuid>`.
+- Reserver le pipeline Playwright + LLM d'extraction aux fiches deja
+  identifiees.
 - Ajouter un prefiltre deterministe avant tout appel LLM.
 - Marquer explicitement les blocages anti-bot et consent walls.
 - Appliquer des quotas par source et par run.
@@ -85,6 +89,9 @@ Configuration GitHub Actions recommandee :
   `SOURCING_IMAP_PASSWORD` pour alimenter automatiquement la queue.
 - Variables optionnelles `SOURCING_IMAP_PORT`, `SOURCING_IMAP_MAILBOX`,
   `SOURCING_IMAP_SENDER` et `SOURCING_IMAP_LOOKBACK_DAYS`.
+- Secret optionnel `JINKA_STORAGE_STATE_B64` pour restaurer une session Jinka
+  Playwright et transformer les alertes en URLs d'annonces dans CI.
+- Variable optionnelle `JINKA_ALERT_LIMIT`, par defaut `10`.
 - Variable optionnelle `SOURCING_SOURCE_LIMIT`, par defaut `20`.
 - Variable optionnelle `SOURCING_ALLOWED_DOMAINS`, par defaut
   `jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr`.

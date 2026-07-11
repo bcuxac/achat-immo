@@ -174,6 +174,25 @@ class SourcingRunRecordSchema(BoundaryModel):
     error_message: str = ""
 
 
+class JinkaAlertRecordSchema(BoundaryModel):
+    """Contrat valide pour une alerte Jinka a collecter."""
+
+    alert_id: str = Field(min_length=8)
+    id: int | None = None
+    date_creation: str = ""
+    date_update: str = ""
+    source_url: str = ""
+    source: str = "jinka_email"
+    status: str = "pending"
+    priority: int = 0
+    attempts: int = Field(default=0, ge=0)
+    last_notification_count: int | None = Field(default=None, ge=0)
+    last_seen_at: str = ""
+    last_collected_at: str = ""
+    discovered_ads_count: int = Field(default=0, ge=0)
+    last_error: str = ""
+
+
 class SimulationResultRowSchema(BoundaryModel):
     """Contrat plat pour une ligne persistable de resultat de simulation."""
 

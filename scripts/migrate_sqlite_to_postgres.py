@@ -23,7 +23,21 @@ from achat_immo.storage import (
 )
 
 
-TABLES = ("annonces", "hypotheses_achat", "simulation_runs", "simulation_results")
+TABLES = (
+    "annonces",
+    "hypotheses_achat",
+    "simulation_runs",
+    "simulation_results",
+    "extraction_runs",
+    "analysis_runs",
+    "sourcing_queue",
+    "sourcing_runs",
+    "jinka_alerts",
+    "investment_profile_versions",
+    "viability_maps",
+    "viability_points",
+    "qualification_runs",
+)
 
 
 def _fetch_rows(conn: DatabaseConnection, table: str) -> list[dict[str, Any]]:

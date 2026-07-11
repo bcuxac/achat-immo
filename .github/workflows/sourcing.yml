@@ -15,6 +15,10 @@ on:
         description: "Nombre de jours d'alertes e-mail a importer (90 pour le chargement initial)"
         required: false
         default: "2"
+      jinka_alert_limit:
+        description: "Nombre maximal d'alertes Jinka a developper en annonces"
+        required: false
+        default: "10"
       allowed_domains:
         description: "Domaines autorises, separes par des virgules"
         required: false
@@ -41,6 +45,8 @@ jobs:
       SOURCING_IMAP_MAILBOX: ${{ vars.SOURCING_IMAP_MAILBOX || 'INBOX' }}
       SOURCING_IMAP_SENDER: ${{ vars.SOURCING_IMAP_SENDER }}
       SOURCING_IMAP_LOOKBACK_DAYS: ${{ github.event.inputs.mail_lookback_days || vars.SOURCING_IMAP_LOOKBACK_DAYS || '2' }}
+      JINKA_STORAGE_STATE_B64: ${{ secrets.JINKA_STORAGE_STATE_B64 }}
+      JINKA_ALERT_LIMIT: ${{ github.event.inputs.jinka_alert_limit || vars.JINKA_ALERT_LIMIT || '10' }}
       PYTHONPATH: src
       SOURCING_LIMIT: ${{ github.event.inputs.limit || vars.SOURCING_LIMIT || '20' }}
       SOURCING_SOURCE_LIMIT: ${{ github.event.inputs.source_limit || vars.SOURCING_SOURCE_LIMIT || '20' }}
@@ -69,6 +75,16 @@ jobs:
       - name: Importer les alertes Jinka depuis IMAP
         if: ${{ env.SOURCING_IMAP_HOST != '' && env.SOURCING_IMAP_USERNAME != '' && env.SOURCING_IMAP_PASSWORD != '' }}
         run: uv run python scripts/ingest_imap_alerts.py --lookback-days "${SOURCING_IMAP_LOOKBACK_DAYS}"
+
+      - name: Restaurer la session Jinka
+        if: ${{ env.JINKA_STORAGE_STATE_B64 != '' }}
+        run: |
+          mkdir -p data
+          printf '%s' "${JINKA_STORAGE_STATE_B64}" | base64 --decode > data/jinka_storage_state.json
+
+      - name: Developper les alertes Jinka en URLs
+        if: ${{ env.JINKA_STORAGE_STATE_B64 != '' }}
+        run: uv run python scripts/collect_jinka_alert_ads.py --limit "${JINKA_ALERT_LIMIT}"
 
       - name: Verifier les secrets
         run: |

@@ -14,9 +14,11 @@ from achat_immo.storage import (
     complete_sourcing_run,
     count_sourcing_queue,
     create_sourcing_run,
+    enqueue_jinka_alert,
     enqueue_sourcing_url,
     fiscalite_from_hypotheses,
     find_annonce_id_by_url,
+    get_jinka_alert,
     get_sourcing_queue_item,
     get_annonce_bundle,
     is_postgres_target,
@@ -28,6 +30,12 @@ from achat_immo.storage import (
     list_simulation_runs,
     list_sourcing_queue,
     list_sourcing_runs,
+    list_jinka_alerts,
+    list_pending_jinka_alerts,
+    mark_jinka_alert_blocked,
+    mark_jinka_alert_failure,
+    mark_jinka_alert_processing,
+    mark_jinka_alert_success,
     mark_sourcing_url_blocked,
     mark_sourcing_url_failure,
     mark_sourcing_url_pending,
@@ -394,6 +402,62 @@ def test_sourcing_queue_dedoublonne_et_transitionne(tmp_path: Path) -> None:
     assert pending_item is not None
     assert pending_item["status"] == "pending"
     assert pending_item["last_error"] == ""
+
+
+def test_jinka_alerts_dedoublonnent_et_repassent_pending_sur_notification_recente(tmp_path: Path) -> None:
+    conn = open_database(tmp_path / "achat.sqlite")
+    alert_id = "9aa8e8eab78a4e21034e334d90719be0"
+
+    first_id = enqueue_jinka_alert(
+        conn,
+        alert_id,
+        source_url=f"https://www.jinka.fr/alerts?alert_id={alert_id}",
+        observed_at="2026-07-10T03:13:11+00:00",
+        notification_count=4,
+    )
+    second_id = enqueue_jinka_alert(
+        conn,
+        alert_id,
+        observed_at="2026-07-10T03:13:11+00:00",
+        notification_count=4,
+    )
+
+    assert first_id == second_id
+    assert list_pending_jinka_alerts(conn)[0]["alert_id"] == alert_id
+
+    mark_jinka_alert_processing(conn, first_id)
+    processing = list_jinka_alerts(conn, status="processing")
+    assert processing[0]["attempts"] == 1
+
+    mark_jinka_alert_success(conn, first_id, discovered_ads_count=4)
+    assert not list_pending_jinka_alerts(conn)
+
+    enqueue_jinka_alert(
+        conn,
+        alert_id,
+        observed_at="2026-07-10T03:13:11+00:00",
+        notification_count=4,
+    )
+    assert get_jinka_alert(conn, first_id)["status"] == "done"
+
+    enqueue_jinka_alert(
+        conn,
+        alert_id,
+        observed_at="2026-07-11T03:13:11+00:00",
+        notification_count=2,
+    )
+    refreshed = get_jinka_alert(conn, first_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "pending"
+    assert refreshed["last_notification_count"] == 2
+
+    mark_jinka_alert_failure(conn, first_id, "timeout")
+    enqueue_jinka_alert(conn, alert_id, observed_at="2026-07-11T03:13:11+00:00")
+    assert get_jinka_alert(conn, first_id)["status"] == "pending"
+
+    mark_jinka_alert_blocked(conn, first_id, "session expiree")
+    blocked = list_jinka_alerts(conn, status="blocked")
+    assert blocked[0]["last_error"] == "session expiree"
 
 
 def test_sqlite_sauvegarde_les_runs_de_sourcing(tmp_path: Path) -> None:

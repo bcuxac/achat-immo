@@ -168,3 +168,23 @@ class SourcingRunRecord:
     blocked: int = 0
     pending_after: int = 0
     error_message: str = ""
+
+
+@dataclass(slots=True)
+class JinkaAlertRecord:
+    """Alerte Jinka a developper en URLs d'annonces."""
+
+    alert_id: str
+    id: int | None = None
+    date_creation: str = ""
+    date_update: str = ""
+    source_url: str = ""
+    source: str = "jinka_email"
+    status: str = "pending"
+    priority: int = 0
+    attempts: int = 0
+    last_notification_count: int | None = None
+    last_seen_at: str = ""
+    last_collected_at: str = ""
+    discovered_ads_count: int = 0
+    last_error: str = ""

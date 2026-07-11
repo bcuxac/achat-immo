@@ -7,13 +7,18 @@ import argparse
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.parser import BytesParser
+from email.utils import parsedate_to_datetime
 import imaplib
 import os
 
 from dotenv import load_dotenv
 
-from achat_immo.sourcing_discovery import extract_jinka_urls_from_message
-from achat_immo.storage import enqueue_sourcing_url, open_database
+from achat_immo.sourcing_discovery import (
+    extract_jinka_alert_ids_from_message,
+    extract_jinka_notification_count_from_message,
+    extract_jinka_urls_from_message,
+)
+from achat_immo.storage import enqueue_jinka_alert, enqueue_sourcing_url, open_database
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +26,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lookback-days", type=int, default=2, help="Fenetre de recherche des messages.")
     parser.add_argument("--source", default="jinka_email", help="Nom enregistre dans la queue.")
     parser.add_argument("--priority", type=int, default=0, help="Priorite des nouvelles URLs.")
+    parser.add_argument(
+        "--mode",
+        choices=("alerts", "ads", "both"),
+        default="both",
+        help="Nature des elements importes depuis les messages.",
+    )
+    parser.add_argument(
+        "--no-resolve-tracked-links",
+        action="store_true",
+        help="Ne pas suivre le lien 'Voir dans l'application Jinka' pour retrouver alert_id.",
+    )
     return parser
 
 
@@ -80,18 +96,60 @@ def main() -> None:
     raw_messages = fetch_messages(lookback_days=args.lookback_days)
 
     urls: list[str] = []
+    alert_rows: list[tuple[str, str, int | None]] = []
     for raw_message in raw_messages:
         message = BytesParser(policy=policy.default).parsebytes(raw_message)
-        urls.extend(extract_jinka_urls_from_message(message))
+        if args.mode in {"ads", "both"}:
+            urls.extend(extract_jinka_urls_from_message(message))
+        if args.mode in {"alerts", "both"}:
+            observed_at = _message_observed_at(message)
+            notification_count = extract_jinka_notification_count_from_message(message)
+            for alert_id in extract_jinka_alert_ids_from_message(
+                message,
+                resolve_tracked_links=not args.no_resolve_tracked_links,
+            ):
+                alert_rows.append((alert_id, observed_at, notification_count))
     urls = list(dict.fromkeys(urls))
+    alert_rows = list(dict.fromkeys(alert_rows))
 
     conn = open_database()
     try:
+        for alert_id, observed_at, notification_count in alert_rows:
+            enqueue_jinka_alert(
+                conn,
+                alert_id,
+                source_url=_jinka_alert_url(alert_id),
+                source=args.source,
+                priority=args.priority,
+                observed_at=observed_at,
+                notification_count=notification_count,
+            )
         for url in urls:
             enqueue_sourcing_url(conn, url, source=args.source, priority=args.priority)
     finally:
         conn.close()
-    print(f"{len(raw_messages)} message(s) examines, {len(urls)} annonce(s) Jinka mise(s) en queue.")
+    print(
+        f"{len(raw_messages)} message(s) examines, "
+        f"{len(alert_rows)} alerte(s) Jinka importee(s), "
+        f"{len(urls)} annonce(s) Jinka mise(s) en queue."
+    )
+
+
+def _message_observed_at(message) -> str:  # noqa: ANN001
+    date_header = message.get("Date", "")
+    if not date_header:
+        return ""
+    try:
+        parsed = parsedate_to_datetime(date_header)
+    except (TypeError, ValueError, IndexError):
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def _jinka_alert_url(alert_id: str) -> str:
+    return f"https://www.jinka.fr/alerts?alert_id={alert_id}"
 
 
 if __name__ == "__main__":
