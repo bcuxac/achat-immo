@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from achat_immo.sourcing_agents.content_guard import ContentAccessDecision, SourcingAccessBlockedError
+from achat_immo.sourcing_agents.rate_limit import SourcingRateLimitedError
 from achat_immo.sourcing_queue_actions import process_sourcing_queue_item
 from achat_immo.storage import (
     AnnonceRecord,
@@ -83,3 +84,24 @@ def test_process_sourcing_queue_item_marque_un_blocage_source(tmp_path: Path) ->
     assert updated is not None
     assert updated["status"] == "blocked"
     assert updated["last_error"] == "Blocage anti-bot detecte: cloudflare."
+
+
+def test_process_sourcing_queue_item_reporte_un_quota_temporaire(tmp_path: Path) -> None:
+    conn = open_database(tmp_path / "achat.sqlite")
+    queue_id = enqueue_sourcing_url(conn, "https://example.test/annonce")
+    item = get_sourcing_queue_item(conn, queue_id)
+    assert item is not None
+
+    class FakeOrchestrator:
+        def process_url(self, conn, url: str) -> int:
+            raise SourcingRateLimitedError("Quota Gemini temporairement atteint.", retry_after_seconds=42)
+
+    result = process_sourcing_queue_item(conn, item, FakeOrchestrator())
+    updated = get_sourcing_queue_item(conn, queue_id)
+
+    assert result.status == "rate_limited"
+    assert result.attempted_processing
+    assert updated is not None
+    assert updated["status"] == "pending"
+    assert "Quota Gemini" in updated["last_error"]
+    assert "42" in updated["last_error"]

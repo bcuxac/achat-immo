@@ -96,6 +96,9 @@ Configuration GitHub Actions recommandee :
   respecter le quota gratuit Gemini.
 - Variable optionnelle `GEMINI_MAX_RETRIES`, par defaut `1`, pour retenter une
   erreur temporaire de quota Gemini.
+- Les erreurs Gemini `RESOURCE_EXHAUSTED` arretent proprement le run en statut
+  `rate_limited` et remettent l'URL courante en attente au lieu de la marquer
+  comme echec metier.
 - Variable optionnelle `SOURCING_SOURCE_LIMIT`, par defaut `20`.
 - Variable optionnelle `SOURCING_ALLOWED_DOMAINS`, par defaut
   `jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr`.

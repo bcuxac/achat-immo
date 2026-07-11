@@ -202,6 +202,11 @@ erreurs temporaires de quota. Les variables `GEMINI_MIN_INTERVAL_SECONDS` et
 `GEMINI_MAX_RETRIES` permettent d'ajuster ce comportement, par exemple avec un
 quota payant ou un autre modele.
 
+Si le quota reste atteint apres les tentatives configurees, le run de sourcing
+s'arrete avec le statut `rate_limited` : l'URL en cours est remise en attente
+et les URLs suivantes ne sont pas consommees inutilement. Il suffit alors de
+relancer le workflow ou la commande locale plus tard.
+
 ## Deploiement gratuit pour deux utilisateurs
 
 Architecture cible :

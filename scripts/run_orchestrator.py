@@ -54,6 +54,7 @@ def process_pending_queue(
     failures = 0
     skipped = 0
     blocked = 0
+    rate_limited = 0
     policy = prefilter_policy or UrlPrefilterPolicy()
     pending_items = list_pending_sourcing_urls(conn, limit=limit)
     run_id = create_sourcing_run(
@@ -95,6 +96,10 @@ def process_pending_queue(
             elif result.status == "blocked":
                 blocked += 1
                 logger.warning("Source bloquee pour %s : %s", url, result.message)
+            elif result.status == "rate_limited":
+                rate_limited += 1
+                logger.warning("Quota temporaire atteint pour %s : %s", url, result.message)
+                break
             elif result.status == "failed":
                 failures += 1
                 logger.error("Echec du traitement de %s : %s", url, result.message)
@@ -107,7 +112,7 @@ def process_pending_queue(
             run_id,
             status="failed",
             examined_count=len(pending_items),
-            processed_count=successes + failures + blocked,
+            processed_count=successes + failures + blocked + rate_limited,
             successes=successes,
             failures=failures,
             skipped=skipped,
@@ -120,9 +125,14 @@ def process_pending_queue(
     complete_sourcing_run(
         conn,
         run_id,
-        status=_queue_run_status(failures=failures, skipped=skipped, blocked=blocked),
+        status=_queue_run_status(
+            failures=failures,
+            skipped=skipped,
+            blocked=blocked,
+            rate_limited=rate_limited,
+        ),
         examined_count=len(pending_items),
-        processed_count=successes + failures + blocked,
+        processed_count=successes + failures + blocked + rate_limited,
         successes=successes,
         failures=failures,
         skipped=skipped,
@@ -133,7 +143,9 @@ def process_pending_queue(
     return successes, failures, skipped, blocked
 
 
-def _queue_run_status(*, failures: int, skipped: int, blocked: int) -> str:
+def _queue_run_status(*, failures: int, skipped: int, blocked: int, rate_limited: int = 0) -> str:
+    if rate_limited:
+        return "rate_limited"
     if failures:
         return "completed_with_errors"
     if skipped or blocked:

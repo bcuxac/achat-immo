@@ -7,9 +7,11 @@ from typing import Protocol, Any
 
 from achat_immo.sourcing_agents.content_guard import SourcingAccessBlockedError
 from achat_immo.sourcing_agents.prefilter import UrlPrefilterPolicy, prefilter_url
+from achat_immo.sourcing_agents.rate_limit import SourcingRateLimitedError
 from achat_immo.storage import (
     DatabaseConnection,
     mark_sourcing_url_blocked,
+    mark_sourcing_url_deferred,
     mark_sourcing_url_failure,
     mark_sourcing_url_processing,
     mark_sourcing_url_skipped,
@@ -61,6 +63,12 @@ def process_sourcing_queue_item(
             message=exc.decision.reason,
             attempted_processing=True,
         )
+    except SourcingRateLimitedError as exc:
+        message = exc.reason
+        if exc.retry_after_seconds is not None:
+            message = f"{message} Reessayer apres environ {exc.retry_after_seconds:.0f} secondes."
+        mark_sourcing_url_deferred(conn, queue_id, message)
+        return QueueProcessResult(queue_id, url, "rate_limited", message=message, attempted_processing=True)
     except Exception as exc:
         message = str(exc)
         mark_sourcing_url_failure(conn, queue_id, message)

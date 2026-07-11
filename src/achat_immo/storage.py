@@ -1055,6 +1055,21 @@ def mark_sourcing_url_pending(conn: DatabaseConnection, queue_id: int, *, clear_
     conn.commit()
 
 
+def mark_sourcing_url_deferred(conn: DatabaseConnection, queue_id: int, reason: str) -> None:
+    """Remet une URL en attente apres un blocage temporaire non metier."""
+
+    now = _now_iso()
+    conn.execute(
+        """
+        UPDATE sourcing_queue
+        SET status = 'pending', last_error = ?, last_processed_at = ?, date_update = ?
+        WHERE id = ?
+        """,
+        (reason[:1000], now, now, queue_id),
+    )
+    conn.commit()
+
+
 def count_sourcing_queue(conn: DatabaseConnection, status: str | None = None) -> int:
     if status is None:
         row = conn.execute("SELECT COUNT(*) AS count FROM sourcing_queue").fetchone()

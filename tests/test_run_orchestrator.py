@@ -4,6 +4,7 @@ from achat_immo.investment_profile import InvestmentProfile
 from achat_immo.sourcing_agents.models import CandidateProperty
 from achat_immo.sourcing_agents.orchestrator import SourcingOrchestrator
 from achat_immo.sourcing_agents.content_guard import ContentAccessDecision, SourcingAccessBlockedError
+from achat_immo.sourcing_agents.rate_limit import SourcingRateLimitedError
 from achat_immo.storage import (
     AnnonceRecord,
     HypothesesAchatRecord,
@@ -192,3 +193,30 @@ def test_process_pending_queue_respecte_un_quota_par_source(tmp_path: Path) -> N
     assert run["examined_count"] == 2
     assert run["processed_count"] == 1
     assert run["pending_after"] == 1
+
+
+def test_process_pending_queue_s_arrete_sur_quota_temporaire(tmp_path: Path) -> None:
+    conn = open_database(tmp_path / "achat.sqlite")
+    enqueue_sourcing_url(conn, "https://example.test/quota")
+    enqueue_sourcing_url(conn, "https://example.test/apres")
+
+    class FakeOrchestrator:
+        calls: list[str] = []
+
+        def process_url(self, conn, url: str) -> int:
+            self.calls.append(url)
+            raise SourcingRateLimitedError("Quota Gemini temporairement atteint.", retry_after_seconds=60)
+
+    orchestrator = FakeOrchestrator()
+    result = process_pending_queue(conn, orchestrator, limit=10)
+    rows = list_sourcing_queue(conn)
+    run = list_sourcing_runs(conn)[0]
+
+    assert result == (0, 0, 0, 0)
+    assert orchestrator.calls == ["https://example.test/quota"]
+    assert [row["status"] for row in rows] == ["pending", "pending"]
+    assert "Quota Gemini" in rows[0]["last_error"]
+    assert rows[1]["last_error"] == ""
+    assert run["status"] == "rate_limited"
+    assert run["processed_count"] == 1
+    assert run["pending_after"] == 2

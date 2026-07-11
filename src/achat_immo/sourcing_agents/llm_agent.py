@@ -16,6 +16,7 @@ from playwright_stealth import Stealth
 
 from achat_immo.jinka_collect import DEFAULT_JINKA_STORAGE_STATE
 from achat_immo.sourcing_agents.models import CandidateProperty
+from achat_immo.sourcing_agents.rate_limit import SourcingRateLimitedError
 
 
 CHROMIUM_CANDIDATES = ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable")
@@ -402,9 +403,15 @@ class LLMSourcingAgent:
                 return response
             except Exception as exc:
                 self._last_gemini_call_at = time.monotonic()
-                if attempt >= max_retries or not _is_quota_error(exc):
+                if not _is_quota_error(exc):
                     raise
-                time.sleep(_retry_delay_seconds(exc))
+                retry_delay = _retry_delay_seconds(exc)
+                if attempt >= max_retries:
+                    raise SourcingRateLimitedError(
+                        "Quota Gemini temporairement atteint. Traitement reporte.",
+                        retry_after_seconds=retry_delay,
+                    ) from exc
+                time.sleep(retry_delay)
         raise RuntimeError("Appel Gemini impossible apres retries.")
 
     def _wait_for_gemini_slot(self) -> None:
