@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 from shutil import which
+import time
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
@@ -33,6 +34,42 @@ CONSENT_BUTTON_PATTERNS = (
     "Tout accepter",
     "Accepter",
     "J'accepte",
+)
+DETECTED_LINKS_SECTION = "--- LIENS DETECTES DANS LA PAGE ---"
+URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+STATIC_URL_SUFFIXES = (
+    ".avif",
+    ".css",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".json",
+    ".mp4",
+    ".pdf",
+    ".png",
+    ".svg",
+    ".webp",
+    ".woff",
+    ".woff2",
+)
+IGNORED_ORIGINAL_LINK_HOSTS = {
+    "cdn.iubenda.com",
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "plausible.io",
+    "res.cloudinary.com",
+    "www.facebook.com",
+    "www.instagram.com",
+    "www.linkedin.com",
+    "www.twitter.com",
+    "x.com",
+}
+IGNORED_ORIGINAL_LINK_SUFFIXES = (
+    ".cloudinary.com",
+    ".iubenda.com",
+    ".sentry.io",
 )
 
 
@@ -117,6 +154,79 @@ def _try_click_locator(locator) -> bool:  # noqa: ANN001
         return False
 
 
+def extract_original_link_from_text(text: str) -> str | None:
+    """Trouve deterministiquement un lien d'annonce original dans le texte extrait."""
+
+    candidates: list[str] = []
+    if DETECTED_LINKS_SECTION in text:
+        candidates.extend(_urls_from_text(text.split(DETECTED_LINKS_SECTION, 1)[1]))
+    candidates.extend(_urls_from_text(text))
+    for candidate in candidates:
+        if _is_plausible_original_listing_url(candidate):
+            return candidate
+    return None
+
+
+def gemini_min_interval_seconds() -> float:
+    """Intervalle minimal entre deux appels Gemini pour eviter le quota minute."""
+
+    raw_value = os.environ.get("GEMINI_MIN_INTERVAL_SECONDS", "13").strip()
+    try:
+        return max(float(raw_value), 0.0)
+    except ValueError:
+        return 13.0
+
+
+def gemini_max_retries() -> int:
+    raw_value = os.environ.get("GEMINI_MAX_RETRIES", "1").strip()
+    try:
+        return max(int(raw_value), 0)
+    except ValueError:
+        return 1
+
+
+def _urls_from_text(text: str) -> list[str]:
+    urls: list[str] = []
+    for match in URL_PATTERN.findall(text):
+        url = match.rstrip("),.;]}")
+        if url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _is_plausible_original_listing_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+    if hostname in JINKA_HOSTS or hostname in IGNORED_ORIGINAL_LINK_HOSTS:
+        return False
+    if any(hostname.endswith(suffix) for suffix in IGNORED_ORIGINAL_LINK_SUFFIXES):
+        return False
+    path = parsed.path.lower()
+    if path.endswith(STATIC_URL_SUFFIXES):
+        return False
+    return True
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "429" in message or "resource_exhausted" in message or "quota" in message
+
+
+def _retry_delay_seconds(exc: Exception) -> float:
+    message = str(exc)
+    retry_info_match = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s", message)
+    if retry_info_match:
+        return float(retry_info_match.group(1)) + 1.0
+    retry_sentence_match = re.search(r"retry in (\d+(?:\.\d+)?)s", message, re.IGNORECASE)
+    if retry_sentence_match:
+        return float(retry_sentence_match.group(1)) + 1.0
+    return max(gemini_min_interval_seconds(), 30.0)
+
+
 class LLMPropertySchema(BaseModel):
     """Schéma de données attendu par l'IA lors de la lecture d'une annonce."""
     source: str = Field(description="La source de l'annonce, ex: Leboncoin, SeLoger, BienIci, Jinka, etc. 'Inconnu' si non déterminé.")
@@ -144,6 +254,7 @@ class LLMSourcingAgent:
         if not self.api_key:
             raise ValueError("Une clé d'API GEMINI_API_KEY est requise (variable d'environnement).")
         self.client = genai.Client(api_key=self.api_key)
+        self._last_gemini_call_at = 0.0
         
     def fetch_url(self, url: str) -> str:
         """Tente de récupérer le contenu textuel d'une URL via Playwright."""
@@ -191,7 +302,7 @@ class LLMSourcingAgent:
                     links.append(href)
             
             if links:
-                text += "\n\n--- LIENS DETECTES DANS LA PAGE ---\n" + "\n".join(list(set(links))[:20])
+                text += "\n\n--- LIENS DETECTES DANS LA PAGE ---\n" + "\n".join(list(dict.fromkeys(links))[:20])
                 
             return text
             
@@ -200,6 +311,10 @@ class LLMSourcingAgent:
 
     def extract_original_link(self, aggregator_text: str) -> Optional[str]:
         """Demande à Gemini de trouver le lien source original dans le texte/liens d'un agrégateur."""
+        deterministic_url = extract_original_link_from_text(aggregator_text)
+        if deterministic_url is not None:
+            return deterministic_url
+
         prompt = f"""
         Tu es un assistant qui doit trouver le lien de l'annonce immobilière originale (agence, leboncoin, seloger, etc.) 
         à partir du contenu d'une page d'un agrégateur (comme Jinka ou Castorus).
@@ -213,7 +328,7 @@ class LLMSourcingAgent:
         {aggregator_text[:15000]}
         ---
         """
-        response = self.client.models.generate_content(
+        response = self._generate_content(
             model='gemini-2.5-flash',
             contents=prompt,
             config=genai.types.GenerateContentConfig(
@@ -240,7 +355,7 @@ class LLMSourcingAgent:
         ---
         """
         
-        response = self.client.models.generate_content(
+        response = self._generate_content(
             model='gemini-2.5-flash',
             contents=prompt,
             config=genai.types.GenerateContentConfig(
@@ -276,3 +391,27 @@ class LLMSourcingAgent:
             red_flags=parsed.red_flags,
             donnees_manquantes=parsed.donnees_manquantes
         )
+
+    def _generate_content(self, **kwargs):  # noqa: ANN003, ANN201
+        max_retries = gemini_max_retries()
+        for attempt in range(max_retries + 1):
+            self._wait_for_gemini_slot()
+            try:
+                response = self.client.models.generate_content(**kwargs)
+                self._last_gemini_call_at = time.monotonic()
+                return response
+            except Exception as exc:
+                self._last_gemini_call_at = time.monotonic()
+                if attempt >= max_retries or not _is_quota_error(exc):
+                    raise
+                time.sleep(_retry_delay_seconds(exc))
+        raise RuntimeError("Appel Gemini impossible apres retries.")
+
+    def _wait_for_gemini_slot(self) -> None:
+        interval = gemini_min_interval_seconds()
+        if interval <= 0:
+            return
+        elapsed = time.monotonic() - self._last_gemini_call_at
+        remaining = interval - elapsed
+        if remaining > 0:
+            time.sleep(remaining)

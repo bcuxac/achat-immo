@@ -92,6 +92,10 @@ Configuration GitHub Actions recommandee :
 - Secret optionnel `JINKA_STORAGE_STATE_B64` pour restaurer une session Jinka
   Playwright et transformer les alertes en URLs d'annonces dans CI.
 - Variable optionnelle `JINKA_ALERT_LIMIT`, par defaut `10`.
+- Variable optionnelle `GEMINI_MIN_INTERVAL_SECONDS`, par defaut `13`, pour
+  respecter le quota gratuit Gemini.
+- Variable optionnelle `GEMINI_MAX_RETRIES`, par defaut `1`, pour retenter une
+  erreur temporaire de quota Gemini.
 - Variable optionnelle `SOURCING_SOURCE_LIMIT`, par defaut `20`.
 - Variable optionnelle `SOURCING_ALLOWED_DOMAINS`, par defaut
   `jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr`.

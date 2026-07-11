@@ -47,6 +47,8 @@ jobs:
       SOURCING_IMAP_LOOKBACK_DAYS: ${{ github.event.inputs.mail_lookback_days || vars.SOURCING_IMAP_LOOKBACK_DAYS || '2' }}
       JINKA_STORAGE_STATE_B64: ${{ secrets.JINKA_STORAGE_STATE_B64 }}
       JINKA_ALERT_LIMIT: ${{ github.event.inputs.jinka_alert_limit || vars.JINKA_ALERT_LIMIT || '10' }}
+      GEMINI_MIN_INTERVAL_SECONDS: ${{ vars.GEMINI_MIN_INTERVAL_SECONDS || '13' }}
+      GEMINI_MAX_RETRIES: ${{ vars.GEMINI_MAX_RETRIES || '1' }}
       PYTHONPATH: src
       SOURCING_LIMIT: ${{ github.event.inputs.limit || vars.SOURCING_LIMIT || '20' }}
       SOURCING_SOURCE_LIMIT: ${{ github.event.inputs.source_limit || vars.SOURCING_SOURCE_LIMIT || '20' }}

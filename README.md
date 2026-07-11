@@ -196,6 +196,12 @@ GitHub `SOURCING_IMAP_HOST`, `SOURCING_IMAP_USERNAME` et
 Jinka en URLs avant de traiter la queue. Pour le chargement initial, declencher
 manuellement le workflow avec 90 jours de recul.
 
+Le quota gratuit Gemini peut limiter fortement le rythme de traitement. Par
+defaut, l'agent espace les appels Gemini de 13 secondes et retente une fois les
+erreurs temporaires de quota. Les variables `GEMINI_MIN_INTERVAL_SECONDS` et
+`GEMINI_MAX_RETRIES` permettent d'ajuster ce comportement, par exemple avec un
+quota payant ou un autre modele.
+
 ## Deploiement gratuit pour deux utilisateurs
 
 Architecture cible :
