@@ -223,8 +223,9 @@ class Fiscalite:
     seuil_micro_foncier: float = 15_000.0
     taux_impot_plus_value_pct: float = 19.0
     taux_prelevements_sociaux_plus_value_pct: float = 17.2
-    # Sous la legislation actuelle, le LMNP ne reintegre pas les amortissements pour la PV
-    reintegrer_amortissements_lmnp_plus_value: bool = False
+    # Loi de finances 2025, art. 84 : reintegration pour les cessions depuis le 15/02/2025,
+    # hors categories de residences explicitement exclues par le texte.
+    reintegrer_amortissements_lmnp_plus_value: bool = True
     surtaxe_plus_value_active: bool = True
 
     def __post_init__(self) -> None:

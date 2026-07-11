@@ -33,6 +33,19 @@ class RentControlKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RentReferenceRecord:
+    """Ligne sourcee d'une grille locale de loyer de reference majore."""
+
+    category_id: str
+    sector: str
+    room_count: int
+    construction_period: EpoqueConstruction
+    rental_mode: ModeLocation
+    cap_per_m2: float
+    source_url: str
+
+
+@dataclass(frozen=True, slots=True)
 class CityProfile:
     """Regles locales et bornes connues pour une ville cible."""
 
@@ -199,10 +212,12 @@ CITY_PROFILES: dict[str, CityProfile] = {
         source_urls=(
             "https://www.service-public.fr/simulateur/calcul/zones-tendues",
             "https://www.service-public.fr/particuliers/vosdroits/F1314",
+            "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000047998521",
         ),
         note=(
-            "Zone tendue : la grille ne dispose pas d'un loyer de reference majore local. "
-            "Le precedent loyer et les exceptions de relocation restent a verifier."
+            "Zone tendue depuis le decret n° 2023-822 : absence de grille locale de loyers de "
+            "reference majores. Le loyer precedent et les exceptions de relocation sont requis "
+            "pour verifier le loyer legal."
         ),
     ),
 }
@@ -225,6 +240,46 @@ def legal_rent_caps_per_m2(ville: str) -> tuple[float, ...]:
     if profile is None:
         return ()
     return tuple(sorted(set(profile.loyers_reference_majores_m2.values())))
+
+
+def rent_reference_records(
+    ville: str,
+    mode: ModeLocation,
+) -> tuple[RentReferenceRecord, ...]:
+    """Retourne les seules lignes reglementaires applicables au mode demande."""
+
+    profile = profile_for_city(ville)
+    if profile is None or profile.rent_control_kind != RentControlKind.LOYER_REFERENCE:
+        return ()
+    source_url = profile.source_urls[-1]
+    rows = (
+        RentReferenceRecord(
+            category_id=(
+                f"{sector}:{room_count}:{construction_period.value}:{rental_mode.value}"
+            ),
+            sector=sector,
+            room_count=room_count,
+            construction_period=construction_period,
+            rental_mode=rental_mode,
+            cap_per_m2=cap,
+            source_url=source_url,
+        )
+        for (sector, room_count, construction_period, rental_mode), cap in (
+            profile.loyers_reference_majores_m2.items()
+        )
+        if rental_mode == mode
+    )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                row.sector,
+                row.room_count,
+                row.construction_period.value,
+                row.rental_mode.value,
+            ),
+        )
+    )
 
 
 def profile_for_city(ville: str) -> CityProfile | None:

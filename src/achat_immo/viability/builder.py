@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 from achat_immo.analysis.metrics import summarize_monte_carlo_outputs
-from achat_immo.qualification import evaluate_monte_carlo_summary
+from achat_immo.qualification import classify_monte_carlo_summary
 from achat_immo.stochastic.models import Strategy
 from achat_immo.stochastic.monte_carlo import MonteCarloRunner
 from achat_immo.viability.models import (
@@ -52,17 +52,32 @@ def _evaluate_property(
     strategy = _strategy_for_property(property_, config)
     outputs = runner.run_inputs(strategy, scenario_inputs_for_property(property_, shocks))
     summary = summarize_monte_carlo_outputs(outputs)
-    evaluation = evaluate_monte_carlo_summary(summary, config.targets)
+    classification = classify_monte_carlo_summary(summary, config.targets)
+    reasons = classification.reasons
+    if not property_.rent_legality_verifiable:
+        reasons = (*reasons, "loyer_legal_a_verifier_avec_bail_precedent")
     return ViabilityPoint(
         property=property_,
-        qualification="robustement_viable" if evaluation.meets_targets else "non_viable",
-        reasons=evaluation.reasons,
+        qualification=classification.qualification,
+        reasons=reasons,
         tri_median=_optional_float(summary.get("tri_median")),
         tri_p10=_optional_float(summary.get("tri_p10")),
         cash_on_cash_median=_optional_float(summary.get("coc_median")),
         prudent_monthly_cashflow=_optional_float(summary.get("cashflow_mensuel_minimal_median")),
         positive_cashflow_probability=_optional_float(summary.get("probabilite_cashflow_cumule_positif")),
         valid_scenarios=int(summary.get("nb_scenarios_valides", 0)),
+        first_year_monthly_cashflow_median=_optional_float(
+            summary.get("cashflow_premiere_annee_mensuel_median")
+        ),
+        first_year_monthly_cashflow_p10=_optional_float(
+            summary.get("cashflow_premiere_annee_mensuel_p10")
+        ),
+        all_years_positive_cashflow_probability=_optional_float(
+            summary.get("probabilite_toutes_annees_cashflow_positif")
+        ),
+        cumulative_positive_cashflow_probability=_optional_float(
+            summary.get("probabilite_cashflow_cumule_positif")
+        ),
     )
 
 
@@ -88,6 +103,10 @@ def _strategy_for_property(property_: HypotheticalProperty, config: ViabilityMap
         frais_notaire_estimes=notary_cost,
         frais_gestion_pct=investor.management_fee_pct,
         gestion_agence_active=investor.management_enabled,
+        assurance_pno_annuelle=investor.annual_pno_cost,
+        comptable_lmnp_annuel=investor.annual_accounting_cost,
+        entretien_annuel=investor.annual_maintenance_reserve,
+        cfe_annuelle=investor.annual_cfe_cost,
     )
 
 

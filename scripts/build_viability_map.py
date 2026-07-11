@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from achat_immo.city_profiles import legal_rent_caps_per_m2
+from achat_immo.city_profiles import profile_for_city, rent_reference_records
+from achat_immo.models import ModeLocation, RegimeFiscal
 from achat_immo.storage import get_investment_profile, open_database, save_viability_map
 from achat_immo.viability import (
     LocalMarketScope,
+    RentCapCategory,
     ViabilityMapConfig,
     build_viability_map,
     viability_config_from_profile,
@@ -21,7 +23,7 @@ from achat_immo.viability import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Construire une carte de viabilite Grenoble.")
+    parser = argparse.ArgumentParser(description="Construire une carte de viabilite locale.")
     parser.add_argument("--properties", type=int, help="Remplace le nombre de biens du profil.")
     parser.add_argument("--scenarios", type=int, help="Remplace les scenarios par bien du profil.")
     parser.add_argument("--workers", type=int, help="Remplace le nombre de workers du profil.")
@@ -40,11 +42,31 @@ def default_city_config(
     workers: int | None,
     seed: int,
 ) -> ViabilityMapConfig:
-    """Construit la carte de la ville active avec tous ses plafonds connus."""
+    """Construit la carte avec les seules lignes legales applicables au mode fiscal."""
 
+    city_profile = profile_for_city(profile.target_city)
+    mode = (
+        ModeLocation.MEUBLEE
+        if profile.reference_tax_regime in {RegimeFiscal.LMNP_REEL, RegimeFiscal.MICRO_BIC}
+        else ModeLocation.NUE
+    )
+    records = rent_reference_records(profile.target_city, mode)
     market = LocalMarketScope(
         city=profile.target_city,
-        legal_rent_caps_per_m2=legal_rent_caps_per_m2(profile.target_city),
+        rent_cap_categories=tuple(
+            RentCapCategory(
+                category_id=record.category_id,
+                sector=record.sector,
+                room_count=record.room_count,
+                construction_period=record.construction_period.value,
+                rental_mode=record.rental_mode,
+                cap_per_m2=record.cap_per_m2,
+                source_url=record.source_url,
+            )
+            for record in records
+        ),
+        rent_control_kind=(city_profile.rent_control_kind.value if city_profile else "inconnu"),
+        source_urls=(city_profile.source_urls if city_profile else ()),
     )
     return viability_config_from_profile(
         profile,
@@ -74,6 +96,12 @@ def map_rows(viability_map) -> list[dict[str, object]]:
                 "equity": property_.equity,
                 "total_project_cost": property_.total_project_cost,
                 "legal_rent_cap_per_m2": property_.legal_rent_cap_per_m2,
+                "rent_cap_category_id": property_.rent_cap_category_id,
+                "rent_sector": property_.rent_sector,
+                "room_count": property_.room_count,
+                "construction_period": property_.construction_period,
+                "rent_legality_verifiable": property_.rent_legality_verifiable,
+                "sample_kind": property_.sample_kind,
                 "qualification": point.qualification,
                 "reasons": ",".join(point.reasons),
                 "tri_median": point.tri_median,
@@ -81,6 +109,14 @@ def map_rows(viability_map) -> list[dict[str, object]]:
                 "cash_on_cash_median": point.cash_on_cash_median,
                 "prudent_monthly_cashflow": point.prudent_monthly_cashflow,
                 "positive_cashflow_probability": point.positive_cashflow_probability,
+                "first_year_monthly_cashflow_median": point.first_year_monthly_cashflow_median,
+                "first_year_monthly_cashflow_p10": point.first_year_monthly_cashflow_p10,
+                "all_years_positive_cashflow_probability": (
+                    point.all_years_positive_cashflow_probability
+                ),
+                "cumulative_positive_cashflow_probability": (
+                    point.cumulative_positive_cashflow_probability
+                ),
                 "valid_scenarios": point.valid_scenarios,
             }
         )
@@ -113,12 +149,14 @@ def main() -> None:
         "config": asdict(config),
         "point_count": len(viability_map.points),
         "viable_count": viability_map.viable_count,
+        "self_financed_count": viability_map.self_financed_count,
         "data_file": csv_path.name,
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
         f"Carte generee : {len(viability_map.points)} points, "
-        f"{viability_map.viable_count} robustement viables, "
+        f"{viability_map.viable_count} rentables dont "
+        f"{viability_map.self_financed_count} autofinances, "
         f"base={'non persistee' if map_id is None else f'carte #{map_id}'}.\n{csv_path}\n{metadata_path}"
     )
 

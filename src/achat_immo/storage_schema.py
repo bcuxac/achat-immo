@@ -16,6 +16,7 @@ def init_db(conn: DatabaseConnection) -> None:
     _migrate_hypotheses_achat(conn)
     _migrate_simulation_results(conn)
     _migrate_analysis_runs(conn)
+    _migrate_viability_points(conn)
     conn.commit()
 
 
@@ -263,6 +264,12 @@ _SQLITE_SCHEMA = """
             equity REAL NOT NULL,
             total_project_cost REAL NOT NULL,
             legal_rent_cap_per_m2 REAL,
+            rent_cap_category_id TEXT,
+            rent_sector TEXT,
+            room_count INTEGER,
+            construction_period TEXT,
+            rent_legality_verifiable INTEGER NOT NULL DEFAULT 1,
+            sample_kind TEXT NOT NULL DEFAULT 'sobol',
             qualification TEXT NOT NULL,
             reasons TEXT NOT NULL DEFAULT '',
             tri_median REAL,
@@ -270,6 +277,10 @@ _SQLITE_SCHEMA = """
             cash_on_cash_median REAL,
             prudent_monthly_cashflow REAL,
             positive_cashflow_probability REAL,
+            first_year_monthly_cashflow_median REAL,
+            first_year_monthly_cashflow_p10 REAL,
+            all_years_positive_cashflow_probability REAL,
+            cumulative_positive_cashflow_probability REAL,
             valid_scenarios INTEGER NOT NULL,
             FOREIGN KEY (map_id) REFERENCES viability_maps(id) ON DELETE CASCADE
         );
@@ -536,6 +547,12 @@ _POSTGRES_SCHEMA = """
             equity DOUBLE PRECISION NOT NULL,
             total_project_cost DOUBLE PRECISION NOT NULL,
             legal_rent_cap_per_m2 DOUBLE PRECISION,
+            rent_cap_category_id TEXT,
+            rent_sector TEXT,
+            room_count INTEGER,
+            construction_period TEXT,
+            rent_legality_verifiable BOOLEAN NOT NULL DEFAULT TRUE,
+            sample_kind TEXT NOT NULL DEFAULT 'sobol',
             qualification TEXT NOT NULL,
             reasons TEXT NOT NULL DEFAULT '',
             tri_median DOUBLE PRECISION,
@@ -543,6 +560,10 @@ _POSTGRES_SCHEMA = """
             cash_on_cash_median DOUBLE PRECISION,
             prudent_monthly_cashflow DOUBLE PRECISION,
             positive_cashflow_probability DOUBLE PRECISION,
+            first_year_monthly_cashflow_median DOUBLE PRECISION,
+            first_year_monthly_cashflow_p10 DOUBLE PRECISION,
+            all_years_positive_cashflow_probability DOUBLE PRECISION,
+            cumulative_positive_cashflow_probability DOUBLE PRECISION,
             valid_scenarios INTEGER NOT NULL
         );
 
@@ -674,6 +695,41 @@ def _migrate_analysis_runs(conn: DatabaseConnection) -> None:
         "recommended_project_cost": "ALTER TABLE analysis_runs ADD COLUMN recommended_project_cost REAL",
         "recommended_apport": "ALTER TABLE analysis_runs ADD COLUMN recommended_apport REAL",
         "recommended_loan_amount": "ALTER TABLE analysis_runs ADD COLUMN recommended_loan_amount REAL",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def _migrate_viability_points(conn: DatabaseConnection) -> None:
+    """Ajoute les dimensions reglementaires et les metriques explicites de la carte v2."""
+
+    columns = _table_columns(conn, "viability_points")
+    real_type = "DOUBLE PRECISION" if conn.is_postgres else "REAL"
+    boolean_type = "BOOLEAN NOT NULL DEFAULT TRUE" if conn.is_postgres else "INTEGER NOT NULL DEFAULT 1"
+    migrations = {
+        "rent_cap_category_id": "ALTER TABLE viability_points ADD COLUMN rent_cap_category_id TEXT",
+        "rent_sector": "ALTER TABLE viability_points ADD COLUMN rent_sector TEXT",
+        "room_count": "ALTER TABLE viability_points ADD COLUMN room_count INTEGER",
+        "construction_period": "ALTER TABLE viability_points ADD COLUMN construction_period TEXT",
+        "rent_legality_verifiable": (
+            f"ALTER TABLE viability_points ADD COLUMN rent_legality_verifiable {boolean_type}"
+        ),
+        "sample_kind": (
+            "ALTER TABLE viability_points ADD COLUMN sample_kind TEXT NOT NULL DEFAULT 'sobol'"
+        ),
+        "first_year_monthly_cashflow_median": (
+            f"ALTER TABLE viability_points ADD COLUMN first_year_monthly_cashflow_median {real_type}"
+        ),
+        "first_year_monthly_cashflow_p10": (
+            f"ALTER TABLE viability_points ADD COLUMN first_year_monthly_cashflow_p10 {real_type}"
+        ),
+        "all_years_positive_cashflow_probability": (
+            f"ALTER TABLE viability_points ADD COLUMN all_years_positive_cashflow_probability {real_type}"
+        ),
+        "cumulative_positive_cashflow_probability": (
+            f"ALTER TABLE viability_points ADD COLUMN cumulative_positive_cashflow_probability {real_type}"
+        ),
     }
     for column, statement in migrations.items():
         if column not in columns:

@@ -106,10 +106,17 @@ def scenario_inputs_for_property(
     property_: HypotheticalProperty,
     shocks: tuple[MarketScenarioShock, ...],
 ) -> list[ScenarioInput]:
+    def scenario_rent(shock: MarketScenarioShock) -> float:
+        rent = property_.monthly_rent * shock.rent_multiplier
+        if property_.legal_rent_cap_per_m2 is not None:
+            legal_cap = property_.surface_m2 * property_.legal_rent_cap_per_m2
+            return min(rent, legal_cap)
+        return rent
+
     return [
         ScenarioInput(
             scenario_id=shock.scenario_id,
-            loyer_hc_mensuel=property_.monthly_rent * shock.rent_multiplier,
+            loyer_hc_mensuel=scenario_rent(shock),
             vacance_mois_par_an=shock.vacancy_months,
             croissance_loyer_annuelle_pct=shock.annual_rent_growth_pct,
             inflation_charges_annuelle_pct=shock.annual_charge_inflation_pct,

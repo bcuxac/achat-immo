@@ -1,6 +1,9 @@
 from achat_immo.city_profiles import (
+    RentControlKind,
     loyer_max_hc_mensuel,
     loyer_reference_majore_m2,
+    profile_for_city,
+    rent_reference_records,
 )
 from achat_immo.diagnostics import DiagnosticStatus, diagnostiquer_annonce
 from achat_immo.grids import GrilleParametres, simuler_grille_annonce
@@ -70,3 +73,22 @@ def test_diagnostic_bloque_un_loyer_superieur_au_plafond_local() -> None:
     blocking = [item for item in diagnostics if item.status == DiagnosticStatus.BLOCKING]
 
     assert {item.code for item in blocking} == {"loyer_superieur_plafond_local"}
+
+
+def test_categories_grenoble_conservent_les_dimensions_reglementaires() -> None:
+    records = rent_reference_records("Grenoble", ModeLocation.MEUBLEE)
+
+    assert len(records) == 48
+    assert {record.rental_mode for record in records} == {ModeLocation.MEUBLEE}
+    assert {record.room_count for record in records} == {1, 2, 3, 4}
+    assert {record.sector for record in records} == {"zone_1", "zone_2", "zone_a"}
+    assert all(record.source_url.endswith("Arrete-prefectoral-du-6-janvier-2026.pdf") for record in records)
+
+
+def test_nimes_exige_le_loyer_precedent_sans_grille_locale() -> None:
+    profile = profile_for_city("Nimes")
+
+    assert profile is not None
+    assert profile.rent_control_kind == RentControlKind.ZONE_TENDUE_RELOCATION
+    assert rent_reference_records("Nimes", ModeLocation.MEUBLEE) == ()
+    assert "loyer precedent" in profile.note.lower()

@@ -478,10 +478,14 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
         INSERT INTO viability_points (
             map_id, sample_id, surface_m2, price, monthly_rent, annual_charges,
             property_tax, initial_works, equity, total_project_cost,
-            legal_rent_cap_per_m2, qualification, reasons, tri_median, tri_p10,
+            legal_rent_cap_per_m2, rent_cap_category_id, rent_sector, room_count,
+            construction_period, rent_legality_verifiable, sample_kind,
+            qualification, reasons, tri_median, tri_p10,
             cash_on_cash_median, prudent_monthly_cashflow,
-            positive_cashflow_probability, valid_scenarios
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            positive_cashflow_probability, first_year_monthly_cashflow_median,
+            first_year_monthly_cashflow_p10, all_years_positive_cashflow_probability,
+            cumulative_positive_cashflow_probability, valid_scenarios
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -496,6 +500,12 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
                 point.property.equity,
                 point.property.total_project_cost,
                 point.property.legal_rent_cap_per_m2,
+                point.property.rent_cap_category_id,
+                point.property.rent_sector,
+                point.property.room_count,
+                point.property.construction_period,
+                point.property.rent_legality_verifiable,
+                point.property.sample_kind,
                 point.qualification,
                 ",".join(point.reasons),
                 point.tri_median,
@@ -503,6 +513,10 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
                 point.cash_on_cash_median,
                 point.prudent_monthly_cashflow,
                 point.positive_cashflow_probability,
+                point.first_year_monthly_cashflow_median,
+                point.first_year_monthly_cashflow_p10,
+                point.all_years_positive_cashflow_probability,
+                point.cumulative_positive_cashflow_probability,
                 point.valid_scenarios,
             )
             for point in viability_map.points
@@ -562,6 +576,16 @@ def _viability_point_from_row(row: Mapping[str, Any]) -> ViabilityPoint:
             legal_rent_cap_per_m2=(
                 float(row["legal_rent_cap_per_m2"]) if row["legal_rent_cap_per_m2"] is not None else None
             ),
+            rent_cap_category_id=(
+                str(row["rent_cap_category_id"]) if row["rent_cap_category_id"] is not None else None
+            ),
+            rent_sector=str(row["rent_sector"]) if row["rent_sector"] is not None else None,
+            room_count=int(row["room_count"]) if row["room_count"] is not None else None,
+            construction_period=(
+                str(row["construction_period"]) if row["construction_period"] is not None else None
+            ),
+            rent_legality_verifiable=bool(row["rent_legality_verifiable"]),
+            sample_kind=str(row["sample_kind"]),
         ),
         qualification=str(row["qualification"]),
         reasons=tuple(part for part in str(row["reasons"]).split(",") if part),
@@ -571,6 +595,16 @@ def _viability_point_from_row(row: Mapping[str, Any]) -> ViabilityPoint:
         prudent_monthly_cashflow=_optional_float(row["prudent_monthly_cashflow"]),
         positive_cashflow_probability=_optional_float(row["positive_cashflow_probability"]),
         valid_scenarios=int(row["valid_scenarios"]),
+        first_year_monthly_cashflow_median=_optional_float(
+            row["first_year_monthly_cashflow_median"]
+        ),
+        first_year_monthly_cashflow_p10=_optional_float(row["first_year_monthly_cashflow_p10"]),
+        all_years_positive_cashflow_probability=_optional_float(
+            row["all_years_positive_cashflow_probability"]
+        ),
+        cumulative_positive_cashflow_probability=_optional_float(
+            row["cumulative_positive_cashflow_probability"]
+        ),
     )
 
 

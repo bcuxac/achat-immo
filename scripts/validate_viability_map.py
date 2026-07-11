@@ -36,6 +36,9 @@ def main() -> None:
         property_count=args.properties,
         scenarios_per_property=args.scenarios,
         worker_count=1,
+        # La validation cible volontairement la frontiere d'opportunite : un echantillon
+        # aleatoire general contient trop peu de cas rentables pour mesurer le rappel.
+        frontier_share=1.0,
         seed=args.seed,
     )
     held_out = build_viability_map(held_out_config)

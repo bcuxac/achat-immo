@@ -29,26 +29,30 @@ gestion locative et fiscalite.
 Le prefiltrage a grande echelle repose desormais sur une cartographie hors
 ligne de biens hypothetiques. Pour une ville, un profil investisseur et des
 objectifs donnes, un plan d'experiences Sobol couvre l'espace prix, surface,
-loyer, charges, taxe fonciere, travaux et apport. Les plafonds de loyer distincts
-de la ville sont une dimension du plan ; les categories de bien servent ensuite
-uniquement a retrouver le plafond legal applicable. Tous les biens sont evalues
-sous les memes chocs economiques.
+loyer, charges non recuperables, taxe fonciere, travaux et apport. A Grenoble,
+chaque plafond reste rattache a son secteur, son nombre de pieces, son epoque de
+construction et son mode nu ou meuble. A Nimes, aucun plafond absolu au m2 n'est
+invente : la ville est en zone tendue et le loyer precedent doit etre connu pour
+verifier la relocation. Tous les biens sont evalues sous les memes chocs
+economiques explicitement configures.
 
-Cette carte est destinee a identifier rapidement les annonces proches des zones
-de rentabilite viables. Un Monte Carlo propre au bien et le solveur inverse
+La carte distingue `rentable_et_autofinance`,
+`rentable_cashflow_initial_positif`, `rentable_avec_effort_epargne`,
+`rentabilite_fragile` et `sous_objectif_rentabilite`. Le cash-flow de reference
+est le P10 de la premiere annee ; la pire annee et le cumul sur l'horizon restent
+publies comme indicateurs de risque sans devenir des synonymes de rentabilite.
+Un Monte Carlo propre au bien et le solveur inverse
 restent necessaires dans un second temps pour les opportunites preselectionnees.
 
 Construire la carte de la ville du profil actif :
 
 ```bash
-uv run python scripts/build_viability_map.py --properties 64 --scenarios 20 --workers 1
+uv run python scripts/build_viability_map.py --properties 512 --scenarios 500 --workers 1
 ```
 
 Les fichiers generes sont places dans `outputs/viability/` et ne sont pas
 versionnes. Leur fichier de metadonnees contient toute la configuration utile a
-la reproductibilite. Ce volume volontairement modeste sert a valider le segment ;
-il devra etre augmente seulement apres mesure de la convergence et optimisation
-du cout de calcul.
+la reproductibilite, les categories reglementaires et leurs sources.
 
 ## Monte Carlo propre a une opportunite
 
@@ -139,7 +143,9 @@ Workflow de l'application :
 
 La page `Parametres / Automatisation` permet de modifier le budget total,
 l'apport, le financement, la TMI, l'horizon, les objectifs de rentabilite, les
-budgets de calcul et les hypotheses economiques. Chaque enregistrement ajoute
+budgets de calcul, les bornes d'exploration et chaque cout annuel utilise par la
+carte. Ces bornes sont des choix de simulation explicites, pas des donnees de
+marche inferees. Chaque enregistrement ajoute
 une version immuable identifiee par un hash. La cartographie, le sourcing et les
 relances manuelles lisent ce profil ; les analyses enregistrent son hash dans
 leurs diagnostics.

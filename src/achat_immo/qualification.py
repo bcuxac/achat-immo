@@ -42,6 +42,14 @@ class QualificationEvaluation:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ProfitabilityClassification:
+    """Qualification separee de la rentabilite et de l'autofinancement."""
+
+    qualification: str
+    reasons: tuple[str, ...]
+
+
 def evaluate_monte_carlo_summary(
     summary: Mapping[str, Any],
     targets: ProfitabilityTargets,
@@ -53,14 +61,14 @@ def evaluate_monte_carlo_summary(
         ("tri_p10", targets.target_tri_p10, "tri_p10_insuffisant"),
         ("coc_median", targets.target_coc, "cash_on_cash_insuffisant"),
         (
-            "cashflow_mensuel_minimal_median",
+            "cashflow_premiere_annee_mensuel_p10",
             targets.target_cashflow,
-            "cashflow_prudent_insuffisant",
+            "cashflow_premiere_annee_p10_insuffisant",
         ),
         (
-            "probabilite_cashflow_cumule_positif",
+            "probabilite_cashflow_premiere_annee_positif",
             targets.min_prob_positive_cashflow,
-            "probabilite_cashflow_insuffisante",
+            "probabilite_cashflow_premiere_annee_insuffisante",
         ),
     )
     reasons: list[str] = []
@@ -71,3 +79,43 @@ def evaluate_monte_carlo_summary(
         elif float(value) < threshold:
             reasons.append(failure_reason)
     return QualificationEvaluation(meets_targets=not reasons, reasons=tuple(reasons))
+
+
+def classify_monte_carlo_summary(
+    summary: Mapping[str, Any],
+    targets: ProfitabilityTargets,
+) -> ProfitabilityClassification:
+    """Classe sans confondre rendement patrimonial et besoin de tresorerie."""
+
+    tri_median = summary.get("tri_median")
+    tri_p10 = summary.get("tri_p10")
+    reasons: list[str] = []
+    if tri_median is None or float(tri_median) < targets.target_tri_median:
+        reasons.append("tri_median_insuffisant")
+        if tri_p10 is None or float(tri_p10) < targets.target_tri_p10:
+            reasons.append("tri_p10_insuffisant")
+        return ProfitabilityClassification("sous_objectif_rentabilite", tuple(reasons))
+    if tri_p10 is None or float(tri_p10) < targets.target_tri_p10:
+        return ProfitabilityClassification("rentabilite_fragile", ("tri_p10_insuffisant",))
+
+    full_evaluation = evaluate_monte_carlo_summary(summary, targets)
+    cashflow_reasons = tuple(
+        reason
+        for reason in full_evaluation.reasons
+        if reason not in {"tri_median_insuffisant", "tri_p10_insuffisant"}
+    )
+    if cashflow_reasons:
+        return ProfitabilityClassification("rentable_avec_effort_epargne", cashflow_reasons)
+    worst_year_cashflow = summary.get("cashflow_mensuel_minimal_median")
+    all_years_probability = summary.get("probabilite_toutes_annees_cashflow_positif")
+    if (
+        worst_year_cashflow is not None
+        and float(worst_year_cashflow) >= targets.target_cashflow
+        and all_years_probability is not None
+        and float(all_years_probability) >= targets.min_prob_positive_cashflow
+    ):
+        return ProfitabilityClassification("rentable_et_autofinance", ())
+    return ProfitabilityClassification(
+        "rentable_cashflow_initial_positif",
+        ("cashflow_futur_non_autofinance",),
+    )

@@ -15,6 +15,8 @@ Le `InvestmentProfile` historise maintenant :
 - regime fiscal de reference et gestion ;
 - objectifs TRI, TRI P10, cash-on-cash, cash-flow et probabilite ;
 - budgets de calcul Monte Carlo, solveur et cartographie ;
+- bornes d'exploration surface, prix, loyer, charges non recuperables, taxe et travaux ;
+- PNO, comptabilite, CFE et reserve d'entretien annuelles ;
 - distributions de loyer, vacance, inflation, appreciation, revente et travaux.
 
 Ces valeurs sont modifiables dans `Parametres / Automatisation`. Chaque

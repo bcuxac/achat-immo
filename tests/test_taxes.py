@@ -161,10 +161,11 @@ def test_plus_value_abattements_et_reintegration_lmnp() -> None:
         frais_revente_pct=0.0,
     )
 
-    assert plus_value.prix_acquisition_fiscal == 123_000
-    assert plus_value.plus_value_brute == 37_000
+    assert plus_value.prix_acquisition_fiscal == 113_000
+    assert plus_value.amortissements_reintegres == 10_000
+    assert plus_value.plus_value_brute == 47_000
     assert plus_value.abattement_ir_pct == 30
-    assert plus_value.impot_total == 10_759.97
+    assert plus_value.impot_total == 13_668.07
     assert moins_value.impot_total == 0
 
 

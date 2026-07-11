@@ -26,8 +26,17 @@ versionnee de :
 La cartographie explorera des biens hypothetiques au moyen d'un plan
 d'experiences couvrant l'espace des parametres. Chaque bien hypothetique sera
 evalue sous un ensemble commun de scenarios economiques afin de produire des
-metriques comparables : TRI median et P10, cash-flow prudent, cash-on-cash, VAN,
-probabilite de cash-flow positif et prix maximal viable.
+metriques comparables : TRI median et P10, cash-flow de premiere annee median et
+P10, pire cash-flow annuel, cash-on-cash, VAN, probabilites de cash-flow positif
+et prix maximal compatible avec les objectifs.
+
+La qualification economique d'un point distingue :
+
+- `rentable_et_autofinance` lorsque les objectifs de rendement et de tresorerie sont atteints ;
+- `rentable_cashflow_initial_positif` lorsque la premiere annee est robuste mais pas tout l'horizon ;
+- `rentable_avec_effort_epargne` lorsque les objectifs de TRI sont atteints mais pas ceux de tresorerie ;
+- `rentabilite_fragile` lorsque le TRI median atteint la cible mais pas son P10 ;
+- `sous_objectif_rentabilite` lorsque le TRI median reste sous la cible.
 
 Une annonce reelle sera d'abord projetee dans cette cartographie. Le resultat de
 cette interrogation determinera si elle est :
@@ -50,9 +59,11 @@ Trois etats distincts seront conserves :
 2. la qualification financiere automatique ;
 3. la decision humaine (shortlist, contact, offre, rejet, archive).
 
-Les donnees manquantes seront representees par des plages plausibles. Une
-annonce ne sera `non_viable` que si aucune completion raisonnable de ces plages
-ne franchit la frontiere de viabilite.
+Les donnees manquantes ne seront jamais remplacees silencieusement par une
+valeur supposee. Une plage d'exploration n'est utilisable que si elle est
+explicitement enregistree comme hypothese du profil. Une contrainte legale non
+verifiable, par exemple le loyer precedent en zone tendue sans grille locale,
+declenche un enrichissement et non un verdict juridique.
 
 ## Consequences
 

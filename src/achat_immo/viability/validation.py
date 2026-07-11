@@ -40,7 +40,11 @@ def validate_viability_map(reference: ViabilityMap, held_out: ViabilityMap) -> V
                 legal_rent_cap_per_m2=property_.legal_rent_cap_per_m2,
             ),
         )
-        truth = point.qualification == "robustement_viable"
+        truth = point.qualification in {
+            "rentable_et_autofinance",
+            "rentable_cashflow_initial_positif",
+            "rentable_avec_effort_epargne",
+        }
         predicted = result.qualification in positive_labels
         truly_viable += int(truth)
         predicted_positive += int(predicted)

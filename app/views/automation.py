@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from achat_immo.city_profiles import supported_city_labels
+from achat_immo.city_profiles import profile_for_city, supported_city_labels
 from achat_immo.models import RegimeFiscal
 from achat_immo.storage import (
     DatabaseConnection,
@@ -52,7 +52,7 @@ def _render_viability_maps(conn: DatabaseConnection) -> None:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Ville", str(latest["city"]))
     c2.metric("Points", int(latest["point_count"]))
-    c3.metric("Points viables", int(latest["viable_count"]))
+    c3.metric("Points rentables", int(latest["viable_count"]))
     c4.metric("Active", "oui" if latest["active"] else "non")
     if int(latest["viable_count"]) == 0:
         st.warning("Cette carte ne contient aucun point viable : elle est non conclusive et ne rejettera aucune annonce.")
@@ -89,6 +89,8 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
             index=regime_options.index(profile.reference_tax_regime),
             format_func=lambda value: value.value,
         )
+        if selected_city_profile := profile_for_city(str(city)):
+            st.caption(selected_city_profile.note)
 
         c1, c2, c3, c4 = st.columns(4)
         budget_min = c1.number_input("Budget total min", min_value=1_000.0, value=profile.total_budget_min, step=5_000.0)
@@ -130,15 +132,37 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
         management_fee = c4.number_input(
             "Frais de gestion (%)", min_value=0.0, max_value=30.0, value=profile.management_fee_pct, step=0.5
         )
+        st.caption(
+            "Les couts suivants sont des hypotheses explicites du profil, jamais des donnees "
+            "deduites d'une annonce ou de la ville."
+        )
+        c1, c2, c3, c4 = st.columns(4)
+        annual_pno = c1.number_input(
+            "PNO annuelle", min_value=0.0, value=profile.annual_pno_cost, step=25.0
+        )
+        annual_accounting = c2.number_input(
+            "Comptable annuel", min_value=0.0, value=profile.annual_accounting_cost, step=50.0
+        )
+        annual_maintenance = c3.number_input(
+            "Reserve entretien annuelle",
+            min_value=0.0,
+            value=profile.annual_maintenance_reserve,
+            step=50.0,
+        )
+        annual_cfe = c4.number_input(
+            "CFE annuelle", min_value=0.0, value=profile.annual_cfe_cost, step=50.0
+        )
 
         st.markdown("**Objectifs de viabilite**")
         c1, c2, c3, c4, c5 = st.columns(5)
         target_tri = c1.number_input("TRI median min (%)", value=profile.target_tri_median, step=0.5)
         target_tri_p10 = c2.number_input("TRI P10 min (%)", value=profile.target_tri_p10, step=0.5)
         target_coc = c3.number_input("Cash-on-cash min (%)", value=profile.target_cash_on_cash, step=0.5)
-        target_cf = c4.number_input("Cash-flow prudent min", value=profile.target_monthly_cashflow, step=25.0)
+        target_cf = c4.number_input(
+            "Cash-flow annee 1 P10 min", value=profile.target_monthly_cashflow, step=25.0
+        )
         target_probability_pct = c5.number_input(
-            "Probabilite CF+ min (%)",
+            "Probabilite CF+ annee 1 min (%)",
             min_value=0.0,
             max_value=100.0,
             value=profile.min_positive_cashflow_probability * 100,
@@ -146,7 +170,7 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
         )
 
         with st.expander("Budgets de calcul", expanded=False):
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
             detailed_scenarios = c1.number_input(
                 "Scenarios analyse", min_value=1, value=profile.detailed_scenario_count, step=100
             )
@@ -162,8 +186,92 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
             map_workers = c5.number_input(
                 "Workers carte", min_value=1, max_value=32, value=profile.map_worker_count, step=1
             )
+            map_frontier_share_pct = c6.number_input(
+                "Frontiere favorable (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=profile.map_frontier_share * 100,
+                step=5.0,
+            )
+            c1, c2 = st.columns(2)
+            robust_neighbor_pct = c1.number_input(
+                "Voisins rentables pour qualification robuste (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=profile.prefilter_robust_neighbor_ratio * 100,
+                step=5.0,
+            )
+            potential_neighbor_pct = c2.number_input(
+                "Voisins rentables pour analyse potentielle (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=profile.prefilter_potential_neighbor_ratio * 100,
+                step=5.0,
+            )
 
         with st.expander("Hypotheses economiques avancees", expanded=False):
+            st.caption(
+                "Bornes d'exploration theorique saisies par l'utilisateur : elles ne sont pas "
+                "presentees comme des statistiques de marche. Les charges correspondent uniquement "
+                "a la part non recuperable supportee par le bailleur."
+            )
+            c1, c2, c3, c4 = st.columns(4)
+            map_surface_min = c1.number_input(
+                "Surface min m2", min_value=1.0, value=profile.map_surface_min_m2, step=1.0
+            )
+            map_surface_max = c2.number_input(
+                "Surface max m2", min_value=1.0, value=profile.map_surface_max_m2, step=1.0
+            )
+            map_price_m2_min = c3.number_input(
+                "Prix/m2 min", min_value=1.0, value=profile.map_price_per_m2_min, step=100.0
+            )
+            map_price_m2_max = c4.number_input(
+                "Prix/m2 max", min_value=1.0, value=profile.map_price_per_m2_max, step=100.0
+            )
+            c1, c2, c3, c4 = st.columns(4)
+            map_rent_m2_min = c1.number_input(
+                "Loyer HC/m2 min", min_value=0.1, value=profile.map_rent_per_m2_min, step=0.5
+            )
+            map_rent_m2_max = c2.number_input(
+                "Loyer HC/m2 max", min_value=0.1, value=profile.map_rent_per_m2_max, step=0.5
+            )
+            map_charges_m2_min = c3.number_input(
+                "Charges non recuperables/m2/an min",
+                min_value=0.0,
+                value=profile.map_nonrecoverable_charges_per_m2_min,
+                step=1.0,
+            )
+            map_charges_m2_max = c4.number_input(
+                "Charges non recuperables/m2/an max",
+                min_value=0.0,
+                value=profile.map_nonrecoverable_charges_per_m2_max,
+                step=1.0,
+            )
+            c1, c2, c3, c4 = st.columns(4)
+            map_tax_m2_min = c1.number_input(
+                "Taxe fonciere/m2/an min",
+                min_value=0.0,
+                value=profile.map_property_tax_per_m2_min,
+                step=1.0,
+            )
+            map_tax_m2_max = c2.number_input(
+                "Taxe fonciere/m2/an max",
+                min_value=0.0,
+                value=profile.map_property_tax_per_m2_max,
+                step=1.0,
+            )
+            map_works_m2_min = c3.number_input(
+                "Travaux initiaux/m2 min",
+                min_value=0.0,
+                value=profile.map_initial_works_per_m2_min,
+                step=25.0,
+            )
+            map_works_m2_max = c4.number_input(
+                "Travaux initiaux/m2 max",
+                min_value=0.0,
+                value=profile.map_initial_works_per_m2_max,
+                step=25.0,
+            )
             c1, c2, c3 = st.columns(3)
             rent_low = c1.number_input("Loyer multiplicateur bas", value=profile.rent_multiplier_low, step=0.01)
             rent_mode = c2.number_input("Loyer multiplicateur central", value=profile.rent_multiplier_mode, step=0.01)
@@ -263,6 +371,22 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
                 management_enabled=bool(management_enabled),
                 management_fee_pct=float(management_fee),
                 notary_cost_pct=float(notary_cost),
+                annual_pno_cost=float(annual_pno),
+                annual_accounting_cost=float(annual_accounting),
+                annual_maintenance_reserve=float(annual_maintenance),
+                annual_cfe_cost=float(annual_cfe),
+                map_surface_min_m2=float(map_surface_min),
+                map_surface_max_m2=float(map_surface_max),
+                map_price_per_m2_min=float(map_price_m2_min),
+                map_price_per_m2_max=float(map_price_m2_max),
+                map_rent_per_m2_min=float(map_rent_m2_min),
+                map_rent_per_m2_max=float(map_rent_m2_max),
+                map_nonrecoverable_charges_per_m2_min=float(map_charges_m2_min),
+                map_nonrecoverable_charges_per_m2_max=float(map_charges_m2_max),
+                map_property_tax_per_m2_min=float(map_tax_m2_min),
+                map_property_tax_per_m2_max=float(map_tax_m2_max),
+                map_initial_works_per_m2_min=float(map_works_m2_min),
+                map_initial_works_per_m2_max=float(map_works_m2_max),
                 target_tri_median=float(target_tri),
                 target_tri_p10=float(target_tri_p10),
                 target_cash_on_cash=float(target_coc),
@@ -273,6 +397,9 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
                 map_property_count=int(map_properties),
                 map_scenarios_per_property=int(map_scenarios),
                 map_worker_count=int(map_workers),
+                map_frontier_share=float(map_frontier_share_pct) / 100,
+                prefilter_robust_neighbor_ratio=float(robust_neighbor_pct) / 100,
+                prefilter_potential_neighbor_ratio=float(potential_neighbor_pct) / 100,
                 rent_multiplier_low=float(rent_low),
                 rent_multiplier_mode=float(rent_mode),
                 rent_multiplier_high=float(rent_high),

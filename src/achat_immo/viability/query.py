@@ -19,6 +19,7 @@ class PropertyObservation:
     property_tax: float | None = None
     initial_works: float | None = None
     legal_rent_cap_per_m2: float | None = None
+    previous_monthly_rent: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,12 +44,25 @@ def qualify_observation(
         return FastQualification("carte_indisponible", None, None, None, (), ("carte_vide",))
 
     vector, known, missing = _observation_vector(viability_map, observation)
+    if (
+        viability_map.config.market.rent_control_kind == "zone_tendue_relocation"
+        and observation.previous_monthly_rent is None
+    ):
+        missing = (*missing, "loyer_precedent")
     point_matrix = np.asarray([_point_vector(viability_map, point) for point in viability_map.points])
     distances = np.sqrt(np.mean((point_matrix[:, known] - vector[known]) ** 2, axis=1))
     neighbor_count = min(max(neighbor_count, 1), len(viability_map.points))
     neighbor_indexes = np.argsort(distances)[:neighbor_count]
     viable_mask = np.asarray(
-        [point.qualification == "robustement_viable" for point in viability_map.points],
+        [
+            point.qualification
+            in {
+                "rentable_et_autofinance",
+                "rentable_cashflow_initial_positif",
+                "rentable_avec_effort_epargne",
+            }
+            for point in viability_map.points
+        ],
         dtype=bool,
     )
     ratio = float(np.mean(viable_mask[neighbor_indexes]))
@@ -72,10 +86,10 @@ def qualify_observation(
     if missing:
         qualification = "a_enrichir"
         reasons = ("donnees_manquantes",)
-    elif ratio >= 0.6:
+    elif ratio >= viability_map.config.robust_neighbor_ratio:
         qualification = "robustement_viable"
         reasons = ("voisinage_majoritairement_viable",)
-    elif ratio >= 0.2:
+    elif ratio >= viability_map.config.potential_neighbor_ratio:
         qualification = "potentiellement_viable"
         reasons = ("voisinage_partiellement_viable",)
     else:
@@ -161,7 +175,7 @@ def _feature_bounds(viability_map: ViabilityMap) -> tuple[ParameterRange, ...]:
         config.surface_m2,
         config.price_per_m2,
         config.rent_per_m2,
-        config.annual_charges_per_m2,
+        config.annual_nonrecoverable_charges_per_m2,
         config.property_tax_per_m2,
         config.initial_works_per_m2,
         config.equity,

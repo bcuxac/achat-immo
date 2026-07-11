@@ -17,6 +17,7 @@ def summarize_monte_carlo_outputs(outputs: List[ScenarioOutput]) -> Dict[str, An
     nb_annees_negatif_array = np.array([o.nb_annees_cashflow_negatif for o in valid_outputs])
     coc_array = np.array([o.cash_on_cash_return_pct for o in valid_outputs if o.cash_on_cash_return_pct is not None])
     cf_annuel_minimal_array = np.array([o.cashflow_annuel_minimal for o in valid_outputs])
+    cf_premiere_annee_array = np.array([o.cashflow_premiere_annee for o in valid_outputs])
     
     summary = {}
     
@@ -40,8 +41,20 @@ def summarize_monte_carlo_outputs(outputs: List[ScenarioOutput]) -> Dict[str, An
         summary["coc_p10"] = None
         
     summary["cashflow_mensuel_minimal_median"] = float(np.median(cf_annuel_minimal_array)) / 12.0
+    summary["cashflow_premiere_annee_mensuel_median"] = (
+        float(np.median(cf_premiere_annee_array)) / 12.0
+    )
+    summary["cashflow_premiere_annee_mensuel_p10"] = (
+        float(np.percentile(cf_premiere_annee_array, 10)) / 12.0
+    )
     summary["cashflow_cumule_median"] = float(np.median(cashflow_cumule_array))
     summary["cashflow_cumule_p10"] = float(np.percentile(cashflow_cumule_array, 10))
+    summary["probabilite_cashflow_premiere_annee_positif"] = float(
+        np.mean(cf_premiere_annee_array >= 0)
+    )
+    summary["probabilite_toutes_annees_cashflow_positif"] = float(
+        np.mean(cf_annuel_minimal_array >= 0)
+    )
     summary["probabilite_cashflow_cumule_positif"] = float(np.mean(cashflow_cumule_array > 0))
     summary["probabilite_annee_cashflow_negatif"] = float(np.mean(nb_annees_negatif_array > 0))
     

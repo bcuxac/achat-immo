@@ -25,6 +25,10 @@ class Strategy:
     frais_agence_achat: float = 0.0
     frais_gestion_pct: float = 7.0
     gestion_agence_active: bool = False
+    assurance_pno_annuelle: float = 180.0
+    comptable_lmnp_annuel: float = 500.0
+    entretien_annuel: float = 500.0
+    cfe_annuelle: float = 0.0
 
 @dataclass(slots=True)
 class ScenarioInput:
@@ -51,5 +55,6 @@ class ScenarioOutput:
     patrimoine_net_horizon: float
     prix_net_revente: float
     impot_total_paye: float
+    cashflow_premiere_annee: float = 0.0
     is_valid: bool = True
     error_message: str | None = None

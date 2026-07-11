@@ -47,6 +47,10 @@ class MonteCarloRunner:
             travaux_futurs_annuels=s_in.travaux_imprevus_annuels,
             gestion_agence_active=strategy.gestion_agence_active,
             frais_gestion_pct=strategy.frais_gestion_pct,
+            assurance_pno=strategy.assurance_pno_annuelle,
+            comptable_lmnp=strategy.comptable_lmnp_annuel,
+            entretien_annuel=strategy.entretien_annuel,
+            cfe_annuelle=strategy.cfe_annuelle,
         )
         
         financement = Financement(
@@ -88,6 +92,7 @@ class MonteCarloRunner:
                 patrimoine_net_horizon=res.patrimoine_net_horizon,
                 prix_net_revente=float(res.plus_value.get("prix_cession_net", 0.0)),
                 impot_total_paye=res.impots_total_horizon,
+                cashflow_premiere_annee=(cashflows[0] if cashflows else 0.0),
             )
         except Exception as e:
             return ScenarioOutput(
@@ -101,6 +106,7 @@ class MonteCarloRunner:
                 patrimoine_net_horizon=0.0,
                 prix_net_revente=0.0,
                 impot_total_paye=0.0,
+                cashflow_premiere_annee=0.0,
                 is_valid=False,
                 error_message=str(e)
             )

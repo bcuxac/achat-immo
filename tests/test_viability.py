@@ -1,6 +1,12 @@
 from achat_immo.investment_profile import InvestmentProfile
 from achat_immo.qualification import ProfitabilityTargets
-from achat_immo.viability import LocalMarketScope, ViabilityMapConfig, build_viability_map
+from achat_immo.models import ModeLocation
+from achat_immo.viability import (
+    LocalMarketScope,
+    RentCapCategory,
+    ViabilityMapConfig,
+    build_viability_map,
+)
 from achat_immo.viability.sampling import sample_hypothetical_properties
 from achat_immo.viability.scenarios import generate_common_scenario_shocks, scenario_inputs_for_property
 from achat_immo.viability.profile_config import viability_config_from_profile
@@ -58,6 +64,17 @@ def test_scenarios_communs_appliquent_les_memes_chocs_relatifs() -> None:
     assert first_inputs[0].loyer_hc_mensuel / first.monthly_rent == (
         second_inputs[0].loyer_hc_mensuel / second.monthly_rent
     )
+
+
+def test_scenario_ne_depasse_jamais_le_plafond_legal_courant() -> None:
+    property_ = sample_hypothetical_properties(_config())[0]
+    shocks = generate_common_scenario_shocks(100, seed=456)
+
+    inputs = scenario_inputs_for_property(property_, shocks)
+
+    assert property_.legal_rent_cap_per_m2 is not None
+    legal_monthly_cap = property_.surface_m2 * property_.legal_rent_cap_per_m2
+    assert all(row.loyer_hc_mensuel <= legal_monthly_cap for row in inputs)
 
 
 def test_construction_carte_est_reproductible() -> None:
@@ -132,3 +149,50 @@ def test_validation_hors_echantillon_mesure_le_rappel() -> None:
     assert report.recall is not None
     assert 0 <= report.recall <= 1
     assert report.false_negatives == report.truly_viable - report.true_positives
+
+
+def test_categories_de_plafond_sont_parcourues_sans_perdre_leur_source() -> None:
+    categories = tuple(
+        RentCapCategory(
+            category_id=f"zone_1:{room_count}:avant_1946:meublee",
+            sector="zone_1",
+            room_count=room_count,
+            construction_period="avant_1946",
+            rental_mode=ModeLocation.MEUBLEE,
+            cap_per_m2=18.0 + room_count,
+            source_url="https://example.test/arrete.pdf",
+        )
+        for room_count in (1, 2)
+    )
+    config = _config(
+        market=LocalMarketScope(
+            city="Grenoble",
+            rent_cap_categories=categories,
+            rent_control_kind="loyer_reference",
+        )
+    )
+
+    properties = sample_hypothetical_properties(config)
+
+    assert [property_.room_count for property_ in properties] == [1, 2, 1, 2]
+    assert all(property_.rent_legality_verifiable for property_ in properties)
+
+
+def test_zone_tendue_sans_grille_demande_le_loyer_precedent() -> None:
+    config = _config(
+        market=LocalMarketScope(city="Nimes", rent_control_kind="zone_tendue_relocation")
+    )
+    viability_map = build_viability_map(config)
+    observation = PropertyObservation(
+        surface_m2=30,
+        price=80_000,
+        monthly_rent=500,
+        annual_charges=500,
+        property_tax=700,
+        initial_works=0,
+    )
+
+    result = qualify_observation(viability_map, observation)
+
+    assert result.qualification == "a_enrichir"
+    assert "loyer_precedent" in result.missing_fields

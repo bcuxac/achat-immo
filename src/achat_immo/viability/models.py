@@ -10,6 +10,25 @@ from achat_immo.stochastic.assumptions import StochasticAssumptions
 
 
 @dataclass(frozen=True, slots=True)
+class RentCapCategory:
+    """Plafond legal identifie par les criteres exacts de la grille locale."""
+
+    category_id: str
+    sector: str
+    room_count: int
+    construction_period: str
+    rental_mode: ModeLocation
+    cap_per_m2: float
+    source_url: str
+
+    def __post_init__(self) -> None:
+        if not self.category_id.strip() or not self.sector.strip() or not self.source_url.strip():
+            raise ValueError("Une categorie de plafond doit etre identifiee et sourcee.")
+        if self.room_count <= 0 or self.cap_per_m2 <= 0:
+            raise ValueError("Le nombre de pieces et le plafond doivent etre strictement positifs.")
+
+
+@dataclass(frozen=True, slots=True)
 class ParameterRange:
     """Intervalle ferme utilise par le plan d'experiences."""
 
@@ -29,6 +48,9 @@ class LocalMarketScope:
 
     city: str
     legal_rent_caps_per_m2: tuple[float, ...] = ()
+    rent_cap_categories: tuple[RentCapCategory, ...] = ()
+    rent_control_kind: str = "aucun"
+    source_urls: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.city.strip():
@@ -37,6 +59,21 @@ class LocalMarketScope:
             raise ValueError("Les plafonds de loyer doivent etre strictement positifs.")
         if tuple(sorted(set(self.legal_rent_caps_per_m2))) != self.legal_rent_caps_per_m2:
             raise ValueError("Les plafonds de loyer doivent etre uniques et tries.")
+        if self.rent_cap_categories:
+            category_ids = tuple(category.category_id for category in self.rent_cap_categories)
+            if len(set(category_ids)) != len(category_ids):
+                raise ValueError("Les identifiants de categories de plafond doivent etre uniques.")
+            category_caps = tuple(
+                sorted({category.cap_per_m2 for category in self.rent_cap_categories})
+            )
+            if self.legal_rent_caps_per_m2 and self.legal_rent_caps_per_m2 != category_caps:
+                raise ValueError("Les plafonds agreges doivent correspondre aux categories sourcees.")
+            if not self.legal_rent_caps_per_m2:
+                object.__setattr__(self, "legal_rent_caps_per_m2", category_caps)
+
+    @property
+    def legal_rent_is_verifiable_without_previous_lease(self) -> bool:
+        return bool(self.rent_cap_categories) or self.rent_control_kind == "aucun"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +89,10 @@ class InvestorProfile:
     management_enabled: bool = False
     management_fee_pct: float = 7.0
     notary_cost_pct: float = 8.0
+    annual_pno_cost: float = 180.0
+    annual_accounting_cost: float = 500.0
+    annual_maintenance_reserve: float = 500.0
+    annual_cfe_cost: float = 0.0
 
     def __post_init__(self) -> None:
         if self.credit_rate_pct < 0 or self.borrower_insurance_pct < 0:
@@ -60,6 +101,16 @@ class InvestorProfile:
             raise ValueError("Les durees doivent etre strictement positives.")
         if self.management_fee_pct < 0 or self.notary_cost_pct < 0:
             raise ValueError("Les taux de frais doivent etre positifs ou nuls.")
+        if any(
+            value < 0
+            for value in (
+                self.annual_pno_cost,
+                self.annual_accounting_cost,
+                self.annual_maintenance_reserve,
+                self.annual_cfe_cost,
+            )
+        ):
+            raise ValueError("Les couts annuels explicites doivent etre positifs ou nuls.")
         if not 0 <= self.marginal_tax_rate_pct <= 100:
             raise ValueError("marginal_tax_rate_pct doit etre compris entre 0 et 100.")
 
@@ -81,6 +132,9 @@ class ViabilityMapConfig:
     property_count: int = 64
     scenarios_per_property: int = 20
     worker_count: int = 1
+    frontier_share: float = 0.25
+    robust_neighbor_ratio: float = 0.60
+    potential_neighbor_ratio: float = 0.10
     seed: int = 42
     profile_fingerprint: str = ""
     total_project_budget: ParameterRange = field(default_factory=lambda: ParameterRange(80_000.0, 120_000.0))
@@ -88,14 +142,27 @@ class ViabilityMapConfig:
     surface_m2: ParameterRange = field(default_factory=lambda: ParameterRange(18.0, 70.0))
     price_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(1_500.0, 5_500.0))
     rent_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(10.0, 25.0))
-    annual_charges_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(15.0, 55.0))
+    annual_nonrecoverable_charges_per_m2: ParameterRange = field(
+        default_factory=lambda: ParameterRange(15.0, 55.0)
+    )
     property_tax_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(10.0, 35.0))
     initial_works_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(0.0, 700.0))
-    version: str = "viability_map_v1"
+    version: str = "viability_map_v2"
 
     def __post_init__(self) -> None:
         if self.property_count <= 0 or self.scenarios_per_property <= 0 or self.worker_count <= 0:
             raise ValueError("Les nombres de biens, de scenarios et de workers doivent etre strictement positifs.")
+        if not 0 <= self.frontier_share <= 1:
+            raise ValueError("frontier_share doit etre compris entre 0 et 1.")
+        if not 0 <= self.potential_neighbor_ratio <= self.robust_neighbor_ratio <= 1:
+            raise ValueError("Les seuils de voisinage doivent etre ordonnes entre 0 et 1.")
+        if self.market.rent_cap_categories and any(
+            category.cap_per_m2 <= self.rent_per_m2.minimum
+            for category in self.market.rent_cap_categories
+        ):
+            raise ValueError(
+                "Le loyer au m2 minimal doit rester inferieur a chaque plafond legal explore."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +179,12 @@ class HypotheticalProperty:
     equity: float
     total_project_cost: float
     legal_rent_cap_per_m2: float | None
+    rent_cap_category_id: str | None = None
+    rent_sector: str | None = None
+    room_count: int | None = None
+    construction_period: str | None = None
+    rent_legality_verifiable: bool = True
+    sample_kind: str = "sobol"
 
     @property
     def price_per_m2(self) -> float:
@@ -135,6 +208,10 @@ class ViabilityPoint:
     prudent_monthly_cashflow: float | None
     positive_cashflow_probability: float | None
     valid_scenarios: int
+    first_year_monthly_cashflow_median: float | None = None
+    first_year_monthly_cashflow_p10: float | None = None
+    all_years_positive_cashflow_probability: float | None = None
+    cumulative_positive_cashflow_probability: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,4 +223,16 @@ class ViabilityMap:
 
     @property
     def viable_count(self) -> int:
-        return sum(point.qualification == "robustement_viable" for point in self.points)
+        return sum(
+            point.qualification
+            in {
+                "rentable_et_autofinance",
+                "rentable_cashflow_initial_positif",
+                "rentable_avec_effort_epargne",
+            }
+            for point in self.points
+        )
+
+    @property
+    def self_financed_count(self) -> int:
+        return sum(point.qualification == "rentable_et_autofinance" for point in self.points)

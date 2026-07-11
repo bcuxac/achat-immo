@@ -37,6 +37,23 @@ class InvestmentProfile:
     management_enabled: bool = False
     management_fee_pct: float = 7.0
     notary_cost_pct: float = 8.0
+    annual_pno_cost: float = 180.0
+    annual_accounting_cost: float = 500.0
+    annual_maintenance_reserve: float = 500.0
+    annual_cfe_cost: float = 0.0
+
+    map_surface_min_m2: float = 18.0
+    map_surface_max_m2: float = 70.0
+    map_price_per_m2_min: float = 1_500.0
+    map_price_per_m2_max: float = 5_500.0
+    map_rent_per_m2_min: float = 10.0
+    map_rent_per_m2_max: float = 25.0
+    map_nonrecoverable_charges_per_m2_min: float = 15.0
+    map_nonrecoverable_charges_per_m2_max: float = 55.0
+    map_property_tax_per_m2_min: float = 10.0
+    map_property_tax_per_m2_max: float = 35.0
+    map_initial_works_per_m2_min: float = 0.0
+    map_initial_works_per_m2_max: float = 700.0
 
     target_tri_median: float = 6.0
     target_tri_p10: float = 3.0
@@ -46,9 +63,12 @@ class InvestmentProfile:
 
     detailed_scenario_count: int = 1_000
     solver_scenario_count: int = 300
-    map_property_count: int = 64
-    map_scenarios_per_property: int = 20
+    map_property_count: int = 512
+    map_scenarios_per_property: int = 500
     map_worker_count: int = 1
+    map_frontier_share: float = 0.25
+    prefilter_robust_neighbor_ratio: float = 0.60
+    prefilter_potential_neighbor_ratio: float = 0.10
 
     rent_multiplier_low: float = 0.90
     rent_multiplier_mode: float = 1.00
@@ -94,8 +114,42 @@ class InvestmentProfile:
             value = float(getattr(self, name))
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} doit etre compris entre 0 et 100.")
+        for name in (
+            "annual_pno_cost",
+            "annual_accounting_cost",
+            "annual_maintenance_reserve",
+            "annual_cfe_cost",
+        ):
+            if float(getattr(self, name)) < 0:
+                raise ValueError(f"{name} doit etre positif ou nul.")
+        for label, minimum_name, maximum_name in (
+            ("surface de carte", "map_surface_min_m2", "map_surface_max_m2"),
+            ("prix au m2", "map_price_per_m2_min", "map_price_per_m2_max"),
+            ("loyer au m2", "map_rent_per_m2_min", "map_rent_per_m2_max"),
+            (
+                "charges non recuperables au m2",
+                "map_nonrecoverable_charges_per_m2_min",
+                "map_nonrecoverable_charges_per_m2_max",
+            ),
+            ("taxe fonciere au m2", "map_property_tax_per_m2_min", "map_property_tax_per_m2_max"),
+            ("travaux initiaux au m2", "map_initial_works_per_m2_min", "map_initial_works_per_m2_max"),
+        ):
+            minimum = float(getattr(self, minimum_name))
+            maximum = float(getattr(self, maximum_name))
+            _validate_range(label, minimum, maximum)
+            if maximum == minimum:
+                raise ValueError(f"Le maximum de {label} doit etre strictement superieur au minimum.")
         if not 0 <= self.min_positive_cashflow_probability <= 1:
             raise ValueError("La probabilite minimale doit etre comprise entre 0 et 1.")
+        if not 0 <= self.map_frontier_share <= 1:
+            raise ValueError("La part de frontiere doit etre comprise entre 0 et 1.")
+        if not (
+            0
+            <= self.prefilter_potential_neighbor_ratio
+            <= self.prefilter_robust_neighbor_ratio
+            <= 1
+        ):
+            raise ValueError("Les seuils de voisinage doivent etre ordonnes entre 0 et 1.")
         for name in (
             "detailed_scenario_count",
             "solver_scenario_count",
