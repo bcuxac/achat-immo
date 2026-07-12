@@ -51,6 +51,7 @@ from achat_immo.storage_records import (
 from achat_immo.storage_schema import init_db
 from achat_immo.viability.artifact import deserialize_viability_config, serialize_viability_config
 from achat_immo.viability.models import HypotheticalProperty, ViabilityMap, ViabilityPoint
+from achat_immo.viability.query import MapEstimate
 
 
 def _now_iso() -> str:
@@ -444,18 +445,18 @@ def list_investment_profile_versions(
     return [dict(row) for row in rows]
 
 
-def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) -> int:
+def save_simulation_map(conn: DatabaseConnection, viability_map: ViabilityMap) -> int:
     """Persiste une carte et l'active pour sa ville et son profil."""
 
     config = viability_map.config
     conn.execute(
-        "UPDATE viability_maps SET active = 0 WHERE city = ? AND profile_hash = ?",
+        "UPDATE simulation_maps SET active = 0 WHERE city = ? AND profile_hash = ?",
         (config.market.city, config.profile_fingerprint),
     )
     insert_sql = """
-        INSERT INTO viability_maps (
+        INSERT INTO simulation_maps (
             date_creation, city, profile_hash, map_version, config_json,
-            point_count, viable_count, active
+            point_count, calculated_count, active
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     """
     if conn.is_postgres:
@@ -469,18 +470,18 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
             config.version,
             serialize_viability_config(config),
             len(viability_map.points),
-            viability_map.viable_count,
+            viability_map.calculated_count,
         ),
     )
     map_id = int(cursor.fetchone()["id"]) if conn.is_postgres else int(cursor.lastrowid)
     conn.executemany(
         """
-        INSERT INTO viability_points (
+        INSERT INTO simulation_points (
             map_id, sample_id, surface_m2, price, monthly_rent, annual_charges,
             property_tax, initial_works, equity, total_project_cost,
             legal_rent_cap_per_m2, rent_cap_category_id, rent_sector, room_count,
             construction_period, rent_legality_verifiable, sample_kind,
-            qualification, reasons, tri_median, tri_p10,
+            calculation_status, warnings, tri_median, tri_p10,
             cash_on_cash_median, prudent_monthly_cashflow,
             positive_cashflow_probability, first_year_monthly_cashflow_median,
             first_year_monthly_cashflow_p10, all_years_positive_cashflow_probability,
@@ -506,8 +507,8 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
                 point.property.construction_period,
                 point.property.rent_legality_verifiable,
                 point.property.sample_kind,
-                point.qualification,
-                ",".join(point.reasons),
+                point.calculation_status,
+                ",".join(point.warnings),
                 point.tri_median,
                 point.tri_p10,
                 point.cash_on_cash_median,
@@ -526,14 +527,14 @@ def save_viability_map(conn: DatabaseConnection, viability_map: ViabilityMap) ->
     return map_id
 
 
-def get_active_viability_map(
+def get_active_simulation_map(
     conn: DatabaseConnection,
     city: str,
     profile_hash: str,
 ) -> tuple[int, ViabilityMap] | None:
     row = conn.execute(
         """
-        SELECT * FROM viability_maps
+        SELECT * FROM simulation_maps
         WHERE city = ? AND profile_hash = ? AND active = 1
         ORDER BY id DESC LIMIT 1
         """,
@@ -544,18 +545,18 @@ def get_active_viability_map(
     map_id = int(row["id"])
     config = deserialize_viability_config(str(row["config_json"]))
     point_rows = conn.execute(
-        "SELECT * FROM viability_points WHERE map_id = ? ORDER BY sample_id",
+        "SELECT * FROM simulation_points WHERE map_id = ? ORDER BY sample_id",
         (map_id,),
     ).fetchall()
     points = tuple(_viability_point_from_row(point_row) for point_row in point_rows)
     return map_id, ViabilityMap(config=config, points=points)
 
 
-def list_viability_maps(conn: DatabaseConnection, *, limit: int = 20) -> list[dict[str, Any]]:
+def list_simulation_maps(conn: DatabaseConnection, *, limit: int = 20) -> list[dict[str, Any]]:
     if limit <= 0:
         raise ValueError("La limite doit etre strictement positive.")
     rows = conn.execute(
-        "SELECT * FROM viability_maps ORDER BY id DESC LIMIT ?",
+        "SELECT * FROM simulation_maps ORDER BY id DESC LIMIT ?",
         (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -587,8 +588,8 @@ def _viability_point_from_row(row: Mapping[str, Any]) -> ViabilityPoint:
             rent_legality_verifiable=bool(row["rent_legality_verifiable"]),
             sample_kind=str(row["sample_kind"]),
         ),
-        qualification=str(row["qualification"]),
-        reasons=tuple(part for part in str(row["reasons"]).split(",") if part),
+        calculation_status=str(row["calculation_status"]),
+        warnings=tuple(part for part in str(row["warnings"]).split(",") if part),
         tri_median=_optional_float(row["tri_median"]),
         tri_p10=_optional_float(row["tri_p10"]),
         cash_on_cash_median=_optional_float(row["cash_on_cash_median"]),
@@ -608,25 +609,26 @@ def _viability_point_from_row(row: Mapping[str, Any]) -> ViabilityPoint:
     )
 
 
-def save_qualification_run(
+def save_map_estimate_run(
     conn: DatabaseConnection,
     *,
     annonce_id: int,
     map_id: int | None,
-    profile_hash: str,
-    qualification: str,
-    viable_neighbor_ratio: float | None,
-    distance_to_viable: float | None,
-    estimated_max_price: float | None,
-    missing_fields: Iterable[str] = (),
-    reasons: Iterable[str] = (),
+    simulation_hash: str,
+    estimate: MapEstimate,
 ) -> int:
+    """Trace une interpolation numerique sans produire de qualification."""
+
     insert_sql = """
-        INSERT INTO qualification_runs (
-            annonce_id, map_id, date_run, profile_hash, qualification,
-            viable_neighbor_ratio, distance_to_viable, estimated_max_price,
-            missing_fields, reasons
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO map_estimate_runs (
+            annonce_id, map_id, date_run, simulation_hash, status,
+            nearest_distance, neighbor_count, tri_median,
+            tri_p10, cash_on_cash_median,
+            first_year_cashflow_median,
+            first_year_cashflow_p10, prudent_cashflow,
+            cumulative_positive_probability, tri_percentile,
+            missing_fields, warnings
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     if conn.is_postgres:
         insert_sql += " RETURNING id"
@@ -636,13 +638,20 @@ def save_qualification_run(
             annonce_id,
             map_id,
             _now_iso(),
-            profile_hash,
-            qualification,
-            viable_neighbor_ratio,
-            distance_to_viable,
-            estimated_max_price,
-            ",".join(missing_fields),
-            ",".join(reasons),
+            simulation_hash,
+            estimate.status,
+            estimate.nearest_distance,
+            estimate.neighbor_count,
+            estimate.tri_median,
+            estimate.tri_p10,
+            estimate.cash_on_cash_median,
+            estimate.first_year_monthly_cashflow_median,
+            estimate.first_year_monthly_cashflow_p10,
+            estimate.prudent_monthly_cashflow,
+            estimate.cumulative_positive_cashflow_probability,
+            estimate.tri_percentile,
+            ",".join(estimate.missing_fields),
+            ",".join(estimate.warnings),
         ),
     )
     run_id = int(cursor.fetchone()["id"]) if conn.is_postgres else int(cursor.lastrowid)
@@ -650,15 +659,15 @@ def save_qualification_run(
     return run_id
 
 
-def list_qualification_runs(
+def list_map_estimate_runs(
     conn: DatabaseConnection,
     annonce_id: int | None = None,
 ) -> list[dict[str, Any]]:
     if annonce_id is None:
-        rows = conn.execute("SELECT * FROM qualification_runs ORDER BY id DESC").fetchall()
+        rows = conn.execute("SELECT * FROM map_estimate_runs ORDER BY id DESC").fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM qualification_runs WHERE annonce_id = ? ORDER BY id DESC",
+            "SELECT * FROM map_estimate_runs WHERE annonce_id = ? ORDER BY id DESC",
             (annonce_id,),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -1495,9 +1504,9 @@ def reset_identity_sequences(conn: DatabaseConnection) -> None:
         "sourcing_runs",
         "jinka_alerts",
         "investment_profile_versions",
-        "viability_maps",
-        "viability_points",
-        "qualification_runs",
+        "simulation_maps",
+        "simulation_points",
+        "map_estimate_runs",
     ):
         row = conn.execute(f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {table}").fetchone()
         max_id = int(row["max_id"])

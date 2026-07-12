@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 import json
 
 from achat_immo.investment_profile import InvestmentProfile
-from achat_immo.storage import get_active_viability_map, get_investment_profile, open_database
+from achat_immo.storage import get_active_simulation_map, get_investment_profile, open_database
 from achat_immo.viability.builder import build_viability_map
 from achat_immo.viability.validation import validate_viability_map
 
@@ -19,13 +19,13 @@ def main() -> None:
     parser.add_argument("--properties", type=int, default=16)
     parser.add_argument("--scenarios", type=int, default=10)
     parser.add_argument("--seed", type=int, default=1042)
-    parser.add_argument("--min-recall", type=float, default=0.95)
+    parser.add_argument("--max-tri-mae", type=float, default=2.0)
     args = parser.parse_args()
 
     conn = open_database(args.database)
     try:
         profile: InvestmentProfile = get_investment_profile(conn)
-        active = get_active_viability_map(conn, profile.target_city, profile.fingerprint)
+        active = get_active_simulation_map(conn, profile.target_city, profile.simulation_fingerprint)
     finally:
         conn.close()
     if active is None:
@@ -44,9 +44,10 @@ def main() -> None:
     held_out = build_viability_map(held_out_config)
     report = validate_viability_map(reference, held_out)
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
-    if report.recall is not None and report.recall < args.min_recall:
+    if report.tri_median_mae is not None and report.tri_median_mae > args.max_tri_mae:
         raise SystemExit(
-            f"Rappel insuffisant : {report.recall:.1%}, objectif {args.min_recall:.1%}."
+            f"Erreur TRI median excessive : {report.tri_median_mae:.2f} points, "
+            f"maximum {args.max_tri_mae:.2f}."
         )
 
 

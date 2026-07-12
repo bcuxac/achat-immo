@@ -23,86 +23,110 @@ class PropertyObservation:
 
 
 @dataclass(frozen=True, slots=True)
-class FastQualification:
-    qualification: str
-    viable_neighbor_ratio: float | None
-    distance_to_viable: float | None
-    estimated_max_price: float | None
+class MapEstimate:
+    status: str
+    neighbor_count: int
+    nearest_distance: float | None
+    tri_median: float | None
+    tri_p10: float | None
+    cash_on_cash_median: float | None
+    first_year_monthly_cashflow_median: float | None
+    first_year_monthly_cashflow_p10: float | None
+    prudent_monthly_cashflow: float | None
+    cumulative_positive_cashflow_probability: float | None
+    tri_percentile: float | None
     missing_fields: tuple[str, ...]
-    reasons: tuple[str, ...]
+    warnings: tuple[str, ...]
 
 
-def qualify_observation(
+def estimate_observation(
     viability_map: ViabilityMap,
     observation: PropertyObservation,
     *,
     neighbor_count: int = 15,
-) -> FastQualification:
+) -> MapEstimate:
     if observation.surface_m2 <= 0 or observation.price <= 0:
         raise ValueError("La surface et le prix doivent etre strictement positifs.")
     if not viability_map.points:
-        return FastQualification("carte_indisponible", None, None, None, (), ("carte_vide",))
+        return MapEstimate(
+            "map_unavailable",
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            (),
+            ("carte_vide",),
+        )
 
     vector, known, missing = _observation_vector(viability_map, observation)
+    warnings: list[str] = []
     if (
         viability_map.config.market.rent_control_kind == "zone_tendue_relocation"
         and observation.previous_monthly_rent is None
     ):
         missing = (*missing, "loyer_precedent")
+        warnings.append("loyer_legal_non_verifiable_sans_bail_precedent")
     point_matrix = np.asarray([_point_vector(viability_map, point) for point in viability_map.points])
     distances = np.sqrt(np.mean((point_matrix[:, known] - vector[known]) ** 2, axis=1))
     neighbor_count = min(max(neighbor_count, 1), len(viability_map.points))
     neighbor_indexes = np.argsort(distances)[:neighbor_count]
-    viable_mask = np.asarray(
-        [
-            point.qualification
-            in {
-                "rentable_et_autofinance",
-                "rentable_cashflow_initial_positif",
-                "rentable_avec_effort_epargne",
-            }
-            for point in viability_map.points
-        ],
-        dtype=bool,
+    selected_distances = distances[neighbor_indexes]
+    weights = 1.0 / np.maximum(selected_distances, 1e-9)
+    points = [viability_map.points[index] for index in neighbor_indexes]
+    tri_median = _weighted_optional([point.tri_median for point in points], weights)
+    all_tri = np.asarray(
+        [point.tri_median for point in viability_map.points if point.tri_median is not None],
+        dtype=float,
     )
-    ratio = float(np.mean(viable_mask[neighbor_indexes]))
-    viable_indexes = np.flatnonzero(viable_mask)
-    if len(viable_indexes) == 0:
-        return FastQualification(
-            "carte_non_conclusive",
-            ratio,
-            None,
-            None,
-            missing,
-            ("aucun_point_viable_carte_a_renforcer",),
-        )
-
-    viable_distances = distances[viable_indexes]
-    closest_order = viable_indexes[np.argsort(viable_distances)]
-    closest_viable = closest_order[: min(10, len(closest_order))]
-    distance_to_viable = float(np.min(viable_distances))
-    estimated_max_price = float(max(viability_map.points[index].property.price for index in closest_viable))
-
+    tri_percentile = (
+        float(np.mean(all_tri <= tri_median)) if tri_median is not None and len(all_tri) else None
+    )
     if missing:
-        qualification = "a_enrichir"
-        reasons = ("donnees_manquantes",)
-    elif ratio >= viability_map.config.robust_neighbor_ratio:
-        qualification = "robustement_viable"
-        reasons = ("voisinage_majoritairement_viable",)
-    elif ratio >= viability_map.config.potential_neighbor_ratio:
-        qualification = "potentiellement_viable"
-        reasons = ("voisinage_partiellement_viable",)
-    else:
-        qualification = "non_viable"
-        reasons = ("voisinage_non_viable",)
-    return FastQualification(
-        qualification,
-        round(ratio, 4),
-        round(distance_to_viable, 6),
-        round(estimated_max_price, 2),
+        warnings.append("estimation_partielle_donnees_manquantes")
+    return MapEstimate(
+        "partial_estimate" if missing else "estimated",
+        neighbor_count,
+        round(float(selected_distances[0]), 6),
+        _rounded(tri_median),
+        _rounded(_weighted_optional([point.tri_p10 for point in points], weights)),
+        _rounded(_weighted_optional([point.cash_on_cash_median for point in points], weights)),
+        _rounded(
+            _weighted_optional(
+                [point.first_year_monthly_cashflow_median for point in points], weights
+            )
+        ),
+        _rounded(
+            _weighted_optional([point.first_year_monthly_cashflow_p10 for point in points], weights)
+        ),
+        _rounded(_weighted_optional([point.prudent_monthly_cashflow for point in points], weights)),
+        _rounded(
+            _weighted_optional(
+                [point.cumulative_positive_cashflow_probability for point in points], weights
+            ),
+            digits=4,
+        ),
+        _rounded(tri_percentile, digits=4),
         missing,
-        reasons,
+        tuple(warnings),
     )
+
+
+def _weighted_optional(values: list[float | None], weights: np.ndarray) -> float | None:
+    known = np.asarray([value is not None for value in values], dtype=bool)
+    if not np.any(known):
+        return None
+    numeric = np.asarray([0.0 if value is None else value for value in values], dtype=float)
+    return float(np.average(numeric[known], weights=weights[known]))
+
+
+def _rounded(value: float | None, *, digits: int = 3) -> float | None:
+    return None if value is None else round(value, digits)
 
 
 def _observation_vector(

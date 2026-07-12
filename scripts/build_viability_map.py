@@ -12,7 +12,7 @@ import pandas as pd
 
 from achat_immo.city_profiles import profile_for_city, rent_reference_records
 from achat_immo.models import ModeLocation, RegimeFiscal
-from achat_immo.storage import get_investment_profile, open_database, save_viability_map
+from achat_immo.storage import get_investment_profile, open_database, save_simulation_map
 from achat_immo.viability import (
     LocalMarketScope,
     RentCapCategory,
@@ -102,8 +102,8 @@ def map_rows(viability_map) -> list[dict[str, object]]:
                 "construction_period": property_.construction_period,
                 "rent_legality_verifiable": property_.rent_legality_verifiable,
                 "sample_kind": property_.sample_kind,
-                "qualification": point.qualification,
-                "reasons": ",".join(point.reasons),
+                "calculation_status": point.calculation_status,
+                "warnings": ",".join(point.warnings),
                 "tri_median": point.tri_median,
                 "tri_p10": point.tri_p10,
                 "cash_on_cash_median": point.cash_on_cash_median,
@@ -136,7 +136,7 @@ def main() -> None:
             seed=args.seed,
         )
         viability_map = build_viability_map(config)
-        map_id = None if args.no_persist else save_viability_map(conn, viability_map)
+        map_id = None if args.no_persist else save_simulation_map(conn, viability_map)
     finally:
         conn.close()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -148,15 +148,13 @@ def main() -> None:
     metadata = {
         "config": asdict(config),
         "point_count": len(viability_map.points),
-        "viable_count": viability_map.viable_count,
-        "self_financed_count": viability_map.self_financed_count,
+        "calculated_count": viability_map.calculated_count,
         "data_file": csv_path.name,
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
         f"Carte generee : {len(viability_map.points)} points, "
-        f"{viability_map.viable_count} rentables dont "
-        f"{viability_map.self_financed_count} autofinances, "
+        f"{viability_map.calculated_count} calcules sans qualification, "
         f"base={'non persistee' if map_id is None else f'carte #{map_id}'}.\n{csv_path}\n{metadata_path}"
     )
 

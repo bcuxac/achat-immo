@@ -1,5 +1,4 @@
 from achat_immo.investment_profile import InvestmentProfile
-from achat_immo.qualification import ProfitabilityTargets
 from achat_immo.models import ModeLocation
 from achat_immo.viability import (
     LocalMarketScope,
@@ -11,7 +10,7 @@ from achat_immo.viability.sampling import sample_hypothetical_properties
 from achat_immo.viability.scenarios import generate_common_scenario_shocks, scenario_inputs_for_property
 from achat_immo.viability.profile_config import viability_config_from_profile
 from achat_immo.viability.artifact import deserialize_viability_config, serialize_viability_config
-from achat_immo.viability.query import PropertyObservation, qualify_observation
+from achat_immo.viability.query import PropertyObservation, estimate_observation
 from achat_immo.viability.validation import validate_viability_map
 
 
@@ -24,13 +23,6 @@ def _config(**overrides) -> ViabilityMapConfig:
         "property_count": 4,
         "scenarios_per_property": 3,
         "seed": 123,
-        "targets": ProfitabilityTargets(
-            target_tri_median=-100.0,
-            target_tri_p10=-100.0,
-            target_coc=-100.0,
-            target_cashflow=-100_000.0,
-            min_prob_positive_cashflow=0.0,
-        ),
     }
     values.update(overrides)
     return ViabilityMapConfig(**values)
@@ -83,7 +75,8 @@ def test_construction_carte_est_reproductible() -> None:
 
     assert first == second
     assert len(first.points) == 4
-    assert first.viable_count == 4
+    assert first.calculated_count == 4
+    assert {point.calculation_status for point in first.points} == {"calculated"}
     assert all(point.valid_scenarios == 3 for point in first.points)
     assert all(point.tri_median is not None for point in first.points)
 
@@ -117,7 +110,7 @@ def test_configuration_carte_derive_du_profil_actif() -> None:
     assert config.investor.credit_duration_years == 15
     assert config.investor.credit_rate_pct == 4.1
     assert config.property_count == 8
-    assert config.profile_fingerprint == profile.fingerprint
+    assert config.profile_fingerprint == profile.simulation_fingerprint
 
 
 def test_configuration_carte_supporte_un_roundtrip_serialise() -> None:
@@ -128,27 +121,27 @@ def test_configuration_carte_supporte_un_roundtrip_serialise() -> None:
     assert restored == config
 
 
-def test_requete_partielle_demande_un_enrichissement() -> None:
+def test_requete_partielle_restitue_une_estimation_sans_decision() -> None:
     viability_map = build_viability_map(_config())
     observation = PropertyObservation(surface_m2=30, price=80_000)
 
-    result = qualify_observation(viability_map, observation)
+    result = estimate_observation(viability_map, observation)
 
-    assert result.qualification in {"a_enrichir", "carte_non_conclusive"}
+    assert result.status == "partial_estimate"
+    assert result.tri_median is not None
     assert "loyer" in result.missing_fields
 
 
-def test_validation_hors_echantillon_mesure_le_rappel() -> None:
+def test_validation_hors_echantillon_mesure_l_erreur_numerique() -> None:
     reference = build_viability_map(_config())
     held_out = build_viability_map(_config(seed=456))
 
     report = validate_viability_map(reference, held_out)
 
     assert report.sample_count == 4
-    assert report.truly_viable == 4
-    assert report.recall is not None
-    assert 0 <= report.recall <= 1
-    assert report.false_negatives == report.truly_viable - report.true_positives
+    assert report.estimated_count == 4
+    assert report.tri_median_mae is not None
+    assert report.tri_median_mae >= 0
 
 
 def test_categories_de_plafond_sont_parcourues_sans_perdre_leur_source() -> None:
@@ -192,7 +185,8 @@ def test_zone_tendue_sans_grille_demande_le_loyer_precedent() -> None:
         initial_works=0,
     )
 
-    result = qualify_observation(viability_map, observation)
+    result = estimate_observation(viability_map, observation)
 
-    assert result.qualification == "a_enrichir"
+    assert result.status == "partial_estimate"
     assert "loyer_precedent" in result.missing_fields
+    assert "loyer_legal_non_verifiable_sans_bail_precedent" in result.warnings

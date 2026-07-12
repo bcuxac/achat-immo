@@ -67,8 +67,6 @@ class InvestmentProfile:
     map_scenarios_per_property: int = 500
     map_worker_count: int = 1
     map_frontier_share: float = 0.25
-    prefilter_robust_neighbor_ratio: float = 0.60
-    prefilter_potential_neighbor_ratio: float = 0.10
 
     rent_multiplier_low: float = 0.90
     rent_multiplier_mode: float = 1.00
@@ -143,13 +141,6 @@ class InvestmentProfile:
             raise ValueError("La probabilite minimale doit etre comprise entre 0 et 1.")
         if not 0 <= self.map_frontier_share <= 1:
             raise ValueError("La part de frontiere doit etre comprise entre 0 et 1.")
-        if not (
-            0
-            <= self.prefilter_potential_neighbor_ratio
-            <= self.prefilter_robust_neighbor_ratio
-            <= 1
-        ):
-            raise ValueError("Les seuils de voisinage doivent etre ordonnes entre 0 et 1.")
         for name in (
             "detailed_scenario_count",
             "solver_scenario_count",
@@ -226,6 +217,27 @@ class InvestmentProfile:
     @property
     def fingerprint(self) -> str:
         return hashlib.sha256(self.to_json().encode("utf-8")).hexdigest()
+
+    @property
+    def simulation_fingerprint(self) -> str:
+        """Identifie uniquement les entrees qui modifient les resultats de la carte."""
+
+        values = asdict(self)
+        for name in (
+            "name",
+            "credit_rate_updated_on",
+            "credit_rate_source",
+            "target_tri_median",
+            "target_tri_p10",
+            "target_cash_on_cash",
+            "target_monthly_cashflow",
+            "min_positive_cashflow_probability",
+            "detailed_scenario_count",
+            "solver_scenario_count",
+        ):
+            values.pop(name, None)
+        payload = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _validate_range(

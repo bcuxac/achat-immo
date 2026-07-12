@@ -67,13 +67,13 @@ def build_cockpit_snapshot(
     analysis_runs: list[dict[str, Any]],
     sourcing_queue: list[dict[str, Any]],
     sourcing_runs: list[dict[str, Any]],
-    qualification_runs: list[dict[str, Any]] | None = None,
+    map_estimate_runs: list[dict[str, Any]] | None = None,
 ) -> CockpitSnapshot:
     """Agrege les donnees stockees en vue cockpit."""
 
     latest_extraction = _latest_by_annonce(extraction_runs)
     latest_analysis = _latest_by_annonce(analysis_runs)
-    latest_qualification = _latest_by_annonce(qualification_runs or [])
+    latest_map_estimate = _latest_by_annonce(map_estimate_runs or [])
     blocked_queue_by_annonce = _blocked_queue_by_annonce(sourcing_queue)
 
     items = [
@@ -82,7 +82,7 @@ def build_cockpit_snapshot(
             latest_extraction.get(int(annonce["id"])),
             latest_analysis.get(int(annonce["id"])),
             blocked_queue_by_annonce.get(int(annonce["id"])),
-            latest_qualification.get(int(annonce["id"])),
+            latest_map_estimate.get(int(annonce["id"])),
         )
         for annonce in annonces
         if annonce.get("id") is not None
@@ -112,10 +112,10 @@ def _build_priority_item(
     extraction: dict[str, Any] | None,
     analysis: dict[str, Any] | None,
     blocked_queue: dict[str, Any] | None,
-    qualification: dict[str, Any] | None,
+    map_estimate: dict[str, Any] | None,
 ) -> dict[str, Any]:
     missing_fields = _missing_fields(annonce, extraction)
-    stage = _stage_for_annonce(annonce, extraction, analysis, blocked_queue, missing_fields, qualification)
+    stage = _stage_for_annonce(annonce, extraction, analysis, blocked_queue, missing_fields)
     tri_p50 = _optional_float(annonce.get("tri_p50"))
     cashflow_p50 = _optional_float(annonce.get("cashflow_p50"))
     coc_p50 = _optional_float(annonce.get("coc_p50"))
@@ -141,10 +141,11 @@ def _build_priority_item(
         "signal": _signal_for_item(stage, missing_fields, extraction, analysis, blocked_queue),
         "action": _action_for_stage(stage),
         "score_tri": _opportunity_score(tri_p50, cashflow_p50, coc_p50, discount_pct),
-        "qualification_rapide": (qualification or {}).get("qualification") or "",
-        "ratio_voisins_viables": (qualification or {}).get("viable_neighbor_ratio"),
-        "distance_viable": (qualification or {}).get("distance_to_viable"),
-        "prix_viable_estime": (qualification or {}).get("estimated_max_price"),
+        "estimation_carte": (map_estimate or {}).get("status") or "",
+        "tri_carte_estime": _optional_float((map_estimate or {}).get("tri_median")),
+        "tri_p10_carte_estime": _optional_float((map_estimate or {}).get("tri_p10")),
+        "percentile_tri_carte": _optional_float((map_estimate or {}).get("tri_percentile")),
+        "distance_carte": _optional_float((map_estimate or {}).get("nearest_distance")),
     }
 
 
@@ -154,16 +155,9 @@ def _stage_for_annonce(
     analysis: dict[str, Any] | None,
     blocked_queue: dict[str, Any] | None,
     missing_fields: list[str],
-    qualification: dict[str, Any] | None,
 ) -> str:
     if blocked_queue is not None:
         return "extraction_bloquee"
-
-    fast_status = str((qualification or {}).get("qualification") or "")
-    if fast_status == "a_enrichir":
-        return "donnees_insuffisantes"
-    if fast_status == "non_viable":
-        return "hors_criteres"
 
     status = str(annonce.get("statut") or "")
     if status in {"rejete", "archive", "contacte", "offre_faite", "shortlist", "favori", "a_visiter", "a_negocier"}:

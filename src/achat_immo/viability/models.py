@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from achat_immo.models import ModeLocation, RegimeFiscal
-from achat_immo.qualification import ProfitabilityTargets
 from achat_immo.stochastic.assumptions import StochasticAssumptions
 
 
@@ -127,14 +126,11 @@ class ViabilityMapConfig:
 
     market: LocalMarketScope
     investor: InvestorProfile = field(default_factory=InvestorProfile)
-    targets: ProfitabilityTargets = field(default_factory=ProfitabilityTargets)
     risk_assumptions: StochasticAssumptions = field(default_factory=StochasticAssumptions)
     property_count: int = 64
     scenarios_per_property: int = 20
     worker_count: int = 1
     frontier_share: float = 0.25
-    robust_neighbor_ratio: float = 0.60
-    potential_neighbor_ratio: float = 0.10
     seed: int = 42
     profile_fingerprint: str = ""
     total_project_budget: ParameterRange = field(default_factory=lambda: ParameterRange(80_000.0, 120_000.0))
@@ -147,15 +143,13 @@ class ViabilityMapConfig:
     )
     property_tax_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(10.0, 35.0))
     initial_works_per_m2: ParameterRange = field(default_factory=lambda: ParameterRange(0.0, 700.0))
-    version: str = "viability_map_v2"
+    version: str = "simulation_map_v3"
 
     def __post_init__(self) -> None:
         if self.property_count <= 0 or self.scenarios_per_property <= 0 or self.worker_count <= 0:
             raise ValueError("Les nombres de biens, de scenarios et de workers doivent etre strictement positifs.")
         if not 0 <= self.frontier_share <= 1:
             raise ValueError("frontier_share doit etre compris entre 0 et 1.")
-        if not 0 <= self.potential_neighbor_ratio <= self.robust_neighbor_ratio <= 1:
-            raise ValueError("Les seuils de voisinage doivent etre ordonnes entre 0 et 1.")
         if self.market.rent_cap_categories and any(
             category.cap_per_m2 <= self.rent_per_m2.minimum
             for category in self.market.rent_cap_categories
@@ -200,8 +194,8 @@ class ViabilityPoint:
     """Resultat agrege d'un bien hypothetique sous les scenarios communs."""
 
     property: HypotheticalProperty
-    qualification: str
-    reasons: tuple[str, ...]
+    calculation_status: str
+    warnings: tuple[str, ...]
     tri_median: float | None
     tri_p10: float | None
     cash_on_cash_median: float | None
@@ -222,17 +216,5 @@ class ViabilityMap:
     points: tuple[ViabilityPoint, ...]
 
     @property
-    def viable_count(self) -> int:
-        return sum(
-            point.qualification
-            in {
-                "rentable_et_autofinance",
-                "rentable_cashflow_initial_positif",
-                "rentable_avec_effort_epargne",
-            }
-            for point in self.points
-        )
-
-    @property
-    def self_financed_count(self) -> int:
-        return sum(point.qualification == "rentable_et_autofinance" for point in self.points)
+    def calculated_count(self) -> int:
+        return sum(point.calculation_status == "calculated" for point in self.points)

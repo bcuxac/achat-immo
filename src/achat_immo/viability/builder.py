@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 from achat_immo.analysis.metrics import summarize_monte_carlo_outputs
-from achat_immo.qualification import classify_monte_carlo_summary
 from achat_immo.stochastic.models import Strategy
 from achat_immo.stochastic.monte_carlo import MonteCarloRunner
 from achat_immo.viability.models import (
@@ -52,14 +51,13 @@ def _evaluate_property(
     strategy = _strategy_for_property(property_, config)
     outputs = runner.run_inputs(strategy, scenario_inputs_for_property(property_, shocks))
     summary = summarize_monte_carlo_outputs(outputs)
-    classification = classify_monte_carlo_summary(summary, config.targets)
-    reasons = classification.reasons
+    warnings: tuple[str, ...] = ()
     if not property_.rent_legality_verifiable:
-        reasons = (*reasons, "loyer_legal_a_verifier_avec_bail_precedent")
+        warnings = ("loyer_legal_a_verifier_avec_bail_precedent",)
     return ViabilityPoint(
         property=property_,
-        qualification=classification.qualification,
-        reasons=reasons,
+        calculation_status="calculated",
+        warnings=warnings,
         tri_median=_optional_float(summary.get("tri_median")),
         tri_p10=_optional_float(summary.get("tri_p10")),
         cash_on_cash_median=_optional_float(summary.get("coc_median")),

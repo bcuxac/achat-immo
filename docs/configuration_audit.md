@@ -23,14 +23,18 @@ Ces valeurs sont modifiables dans `Parametres / Automatisation`. Chaque
 enregistrement ajoute une version identifiee par un hash ; une analyse conserve
 ce hash dans ses diagnostics.
 
+La carte possede un hash de simulation distinct. Il exclut les objectifs TRI,
+cash-flow et cash-on-cash : modifier une preference de decision ne change pas
+les sorties mathematiques deja calculees et ne regenere donc pas la carte.
+
 ## Heuristiques encore a traiter
 
 | Emplacement | Valeurs | Traitement prevu |
 |---|---|---|
-| `sourcing_agents/orchestrator.py` | loyer, charges et taxe de repli au m2 | Remplacer par plages locales et qualification `a_enrichir` |
-| Qualification d'une annonce | categorie reglementaire parfois absente | Tester toutes les categories plausibles puis demander l'enrichissement |
+| `sourcing_agents/orchestrator.py` | loyer, charges et taxe de repli au m2 | Remplacer par plages locales et signaler explicitement les donnees absentes |
+| Estimation d'une annonce | categorie reglementaire parfois absente | Interpoler les metriques disponibles et signaler explicitement les dimensions manquantes |
 | `app/sections/financial_analysis.py` | variations compactes de prix et loyer | Conserver comme raccourcis UI, avec saisie libre avancee |
-| `comparison.py` et `property_sheet.py` | seuils et poids de presentation historiques | Remplacer par la qualification canonique issue du profil |
+| `comparison.py` et `property_sheet.py` | seuils et poids de presentation historiques | Les conserver uniquement comme filtres de decision utilisateur |
 | `hypothesis_inference.py` | estimations DPE, charges et travaux | Versionner comme politique d'inference, sans les presenter comme faits |
 | workflow GitHub | quotas et domaines de sourcing | Rendre modifiables via configuration de deploiement synchronisee |
 

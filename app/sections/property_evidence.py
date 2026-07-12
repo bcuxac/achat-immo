@@ -11,7 +11,7 @@ from achat_immo.storage import (
     get_simulation_results,
     list_analysis_runs,
     list_extraction_runs,
-    list_qualification_runs,
+    list_map_estimate_runs,
     list_simulation_runs,
     list_sourcing_runs,
 )
@@ -26,16 +26,16 @@ def property_evidence_section(
     simulation_runs = list_simulation_runs(conn, annonce_id)
     extraction_runs = list_extraction_runs(conn, annonce_id)
     analysis_runs = list_analysis_runs(conn, annonce_id)
-    qualification_runs = list_qualification_runs(conn, annonce_id)
+    map_estimate_runs = list_map_estimate_runs(conn, annonce_id)
     sourcing_runs = list_sourcing_runs(conn) if include_global_sourcing_runs else []
-    if not simulation_runs and not extraction_runs and not analysis_runs and not qualification_runs and not sourcing_runs:
+    if not simulation_runs and not extraction_runs and not analysis_runs and not map_estimate_runs and not sourcing_runs:
         st.info("Pas encore de preuve enregistree.")
         return
 
     _render_evidence_summary(extraction_runs, analysis_runs, simulation_runs)
-    if qualification_runs:
-        st.subheader("Qualification rapide")
-        st.dataframe(pd.DataFrame(qualification_runs).head(10), hide_index=True, width="stretch")
+    if map_estimate_runs:
+        st.subheader("Estimations numeriques de la carte")
+        st.dataframe(pd.DataFrame(map_estimate_runs).head(10), hide_index=True, width="stretch")
 
     if annonce_id is not None and (extraction_runs or analysis_runs):
         delta_snapshot = compare_latest_analysis_runs(analysis_runs)

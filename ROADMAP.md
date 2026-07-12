@@ -17,11 +17,11 @@ d'annonces, les biens ayant un potentiel eleve de rentabilite ajustee du risque.
 - [x] Versionner et charger les artefacts de cartographie.
 - [x] Projeter une annonce complete dans la carte.
 - [x] Interroger une annonce partielle sans inventer les donnees absentes.
-- [x] Produire une qualification explicable et une distance a la frontiere.
+- [x] Produire des sorties numeriques continues et une distance d'interpolation.
 
 ## Lot 3 - Integration du pipeline
 
-- [x] Persister les runs de qualification rapide.
+- [x] Persister les estimations numeriques associees aux annonces.
 - [x] Reserver Monte Carlo et solveur aux annonces preselectionnees.
 - [x] Afficher potentiel, confiance et raisons dans Streamlit.
 - [x] Valider le taux de faux negatifs face aux analyses completes.

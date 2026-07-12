@@ -1,4 +1,4 @@
-"""Cartographie hors ligne des combinaisons immobilieres viables."""
+"""Surfaces hors ligne de resultats financiers pour biens hypothetiques."""
 
 from achat_immo.viability.builder import build_viability_map
 from achat_immo.viability.models import (
@@ -12,7 +12,7 @@ from achat_immo.viability.models import (
     ViabilityPoint,
 )
 from achat_immo.viability.profile_config import viability_config_from_profile
-from achat_immo.viability.query import FastQualification, PropertyObservation, qualify_observation
+from achat_immo.viability.query import MapEstimate, PropertyObservation, estimate_observation
 
 __all__ = [
     "HypotheticalProperty",
@@ -24,8 +24,8 @@ __all__ = [
     "ViabilityMapConfig",
     "ViabilityPoint",
     "build_viability_map",
-    "FastQualification",
+    "MapEstimate",
     "PropertyObservation",
-    "qualify_observation",
+    "estimate_observation",
     "viability_config_from_profile",
 ]

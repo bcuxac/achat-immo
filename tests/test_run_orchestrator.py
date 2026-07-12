@@ -1,8 +1,5 @@
 from pathlib import Path
 
-from achat_immo.investment_profile import InvestmentProfile
-from achat_immo.sourcing_agents.models import CandidateProperty
-from achat_immo.sourcing_agents.orchestrator import SourcingOrchestrator
 from achat_immo.sourcing_agents.content_guard import ContentAccessDecision, SourcingAccessBlockedError
 from achat_immo.sourcing_agents.rate_limit import SourcingRateLimitedError
 from achat_immo.storage import (
@@ -11,12 +8,12 @@ from achat_immo.storage import (
     enqueue_sourcing_url,
     list_sourcing_queue,
     list_sourcing_runs,
-    list_analysis_runs,
-    list_qualification_runs,
+    list_map_estimate_runs,
     open_database,
     save_annonce,
+    save_map_estimate_run,
 )
-from achat_immo.viability.query import FastQualification
+from achat_immo.viability.query import MapEstimate
 from scripts.run_orchestrator import process_pending_queue, read_url_file
 
 
@@ -30,53 +27,41 @@ def test_read_url_file_ignore_vides_et_commentaires(tmp_path: Path) -> None:
     assert read_url_file(path) == ["https://example.test/a", "https://example.test/b"]
 
 
-def test_prefiltre_sauvegarde_sans_lancer_analyse_approfondie(tmp_path: Path) -> None:
+def test_estimation_carte_est_tracee_sans_verdict(tmp_path: Path) -> None:
     conn = open_database(tmp_path / "achat.sqlite")
-    orchestrator = SourcingOrchestrator.__new__(SourcingOrchestrator)
-    orchestrator.profile = InvestmentProfile()
-    candidate = CandidateProperty(
-        source="test",
-        url="https://example.test/bien",
-        ville="Grenoble",
-        quartier="Centre",
-        prix=100_000,
-        surface=35,
-        charges_mensuelles=None,
-        taxe_fonciere=None,
-        dpe="D",
-        etage=None,
-        ascenseur=None,
-        loyer_estime=None,
-        confiance_loyer="basse",
-        travaux_visibles=None,
-        red_flags=[],
-        donnees_manquantes=["loyer", "charges", "taxe fonciere"],
+    annonce_id = save_annonce(
+        conn,
+        AnnonceRecord(ville="Grenoble", surface_m2=35, prix_affiche=100_000),
+        HypothesesAchatRecord(loyer_hc_mensuel=600),
     )
-    qualification = FastQualification(
-        qualification="a_enrichir",
-        viable_neighbor_ratio=0.4,
-        distance_to_viable=0.1,
-        estimated_max_price=95_000,
+    estimate = MapEstimate(
+        status="partial_estimate",
+        neighbor_count=15,
+        nearest_distance=0.1,
+        tri_median=4.2,
+        tri_p10=1.3,
+        cash_on_cash_median=-2.0,
+        first_year_monthly_cashflow_median=-120,
+        first_year_monthly_cashflow_p10=-180,
+        prudent_monthly_cashflow=-210,
+        cumulative_positive_cashflow_probability=0.35,
+        tri_percentile=0.78,
         missing_fields=("loyer", "charges"),
-        reasons=("donnees_manquantes",),
+        warnings=("estimation_partielle_donnees_manquantes",),
     )
 
-    annonce_id = orchestrator._save_prefiltered_candidate(
+    save_map_estimate_run(
         conn=conn,
-        candidate=candidate,
-        existing_annonce_id=None,
-        source_url=candidate.url,
-        final_url=candidate.url,
-        text="annonce test",
-        extraction_warning="",
+        annonce_id=annonce_id,
         map_id=None,
-        fast_qualification=qualification,
+        simulation_hash="simulation-test",
+        estimate=estimate,
     )
 
-    assert list_analysis_runs(conn, annonce_id) == []
-    runs = list_qualification_runs(conn, annonce_id)
-    assert runs[0]["qualification"] == "a_enrichir"
-    assert runs[0]["estimated_max_price"] == 95_000
+    runs = list_map_estimate_runs(conn, annonce_id)
+    assert runs[0]["status"] == "partial_estimate"
+    assert runs[0]["tri_median"] == 4.2
+    assert runs[0]["tri_percentile"] == 0.78
 
 
 def test_process_pending_queue_met_a_jour_les_statuts(tmp_path: Path) -> None:

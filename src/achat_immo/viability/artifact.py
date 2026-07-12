@@ -6,7 +6,6 @@ from dataclasses import asdict
 import json
 
 from achat_immo.models import ModeLocation, RegimeFiscal
-from achat_immo.qualification import ProfitabilityTargets
 from achat_immo.stochastic.assumptions import StochasticAssumptions
 from achat_immo.viability.models import (
     InvestorProfile,
@@ -61,14 +60,11 @@ def deserialize_viability_config(payload: str) -> ViabilityMapConfig:
             source_urls=tuple(data["market"].get("source_urls", ())),
         ),
         investor=InvestorProfile(**investor),
-        targets=ProfitabilityTargets(**data["targets"]),
         risk_assumptions=StochasticAssumptions(**data["risk_assumptions"]),
         property_count=int(data["property_count"]),
         scenarios_per_property=int(data["scenarios_per_property"]),
         worker_count=int(data["worker_count"]),
         frontier_share=float(data.get("frontier_share", 0.0)),
-        robust_neighbor_ratio=float(data.get("robust_neighbor_ratio", 0.60)),
-        potential_neighbor_ratio=float(data.get("potential_neighbor_ratio", 0.20)),
         seed=int(data["seed"]),
         profile_fingerprint=str(data.get("profile_fingerprint", "")),
         version=str(data.get("version", "viability_map_v1")),

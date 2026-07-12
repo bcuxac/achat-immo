@@ -34,9 +34,9 @@ TABLES = (
     "sourcing_runs",
     "jinka_alerts",
     "investment_profile_versions",
-    "viability_maps",
-    "viability_points",
-    "qualification_runs",
+    "simulation_maps",
+    "simulation_points",
+    "map_estimate_runs",
 )
 
 

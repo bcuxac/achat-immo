@@ -10,19 +10,20 @@ Ce document trace l'avancement global de l'application et les prochaines étapes
 - [x] Orchestrateur en tâche de fond (`run_orchestrator.py`).
 - [x] Intégration à l'interface Streamlit (UI robuste, sauvegarde en base de données).
 
-## Phase 2 : Cartographie de viabilite et prefiltrage (En cours)
-L'objectif est de precalculer les zones de rentabilite par ville et profil
-investisseur avant de soumettre les annonces prometteuses a l'orchestrateur.
+## Phase 2 : Carte mathematique des simulations (Terminée ✅)
+L'objectif est de precalculer les distributions financieres par ville et
+entrees de simulation, sans qualification ni decision automatique.
 
 - [x] Plan d'experiences Sobol pour les biens hypothetiques.
-- [x] Scenarios economiques communs et qualification canonique.
-- [ ] Artefact de carte indexe et interrogation d'une annonce.
-- [ ] Validation du prefiltre face a un Monte Carlo complet.
-- [ ] Integration dans l'orchestrateur avant l'analyse approfondie.
+- [x] Scenarios economiques communs et metriques continues.
+- [x] Artefact indexe et interpolation numerique d'une annonce.
+- [x] Validation hors echantillon par erreur absolue.
+- [x] Visualisations prix/m2-loyer/m2 et TRI-risque avec annonces superposees.
+- [x] Integration non decisionnelle dans l'orchestrateur.
 
 ## Phase 3 : Acquisition massive et veille active
 - [ ] Définir la source de découverte : alertes, exports ou pages de résultats.
 - [ ] Extraire les donnees minimales sans appel LLM systematique.
-- [ ] Utiliser la carte pour limiter les analyses approfondies.
+- [ ] Utiliser les metriques de carte pour ordonner la file sans supprimer d'annonce.
 - [ ] Notifications Telegram/Discord/Email des annonces identifiées comme "Coup de cœur" par le solveur inversé.
 - [ ] Génération automatique du dossier de financement (PDF).

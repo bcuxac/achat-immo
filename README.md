@@ -26,9 +26,9 @@ gestion locative et fiscalite.
 
 ## Cartographie de viabilite et analyse probabiliste
 
-Le prefiltrage a grande echelle repose desormais sur une cartographie hors
-ligne de biens hypothetiques. Pour une ville, un profil investisseur et des
-objectifs donnes, un plan d'experiences Sobol couvre l'espace prix, surface,
+L'exploration a grande echelle repose desormais sur une carte mathematique hors
+ligne de biens hypothetiques. Pour une ville et des entrees de simulation
+donnees, un plan d'experiences Sobol couvre l'espace prix, surface,
 loyer, charges non recuperables, taxe fonciere, travaux et apport. A Grenoble,
 chaque plafond reste rattache a son secteur, son nombre de pieces, son epoque de
 construction et son mode nu ou meuble. A Nimes, aucun plafond absolu au m2 n'est
@@ -36,13 +36,12 @@ invente : la ville est en zone tendue et le loyer precedent doit etre connu pour
 verifier la relocation. Tous les biens sont evalues sous les memes chocs
 economiques explicitement configures.
 
-La carte distingue `rentable_et_autofinance`,
-`rentable_cashflow_initial_positif`, `rentable_avec_effort_epargne`,
-`rentabilite_fragile` et `sous_objectif_rentabilite`. Le cash-flow de reference
-est le P10 de la premiere annee ; la pire annee et le cumul sur l'horizon restent
-publies comme indicateurs de risque sans devenir des synonymes de rentabilite.
-Un Monte Carlo propre au bien et le solveur inverse
-restent necessaires dans un second temps pour les opportunites preselectionnees.
+La carte ne prend aucune decision : elle stocke les TRI median et P10,
+cash-flows, cash-on-cash et probabilites issus du calcul. Les objectifs
+personnels sont des filtres d'affichage ou des preferences de l'analyse
+detaillee ; les modifier n'invalide pas la carte. Une annonce est interpolee
+dans cet espace sans etre acceptee ni rejetee, puis superposee aux simulations
+dans les graphiques prix/m2-loyer/m2 et TRI-risque.
 
 Construire la carte de la ville du profil actif :
 
@@ -52,7 +51,9 @@ uv run python scripts/build_viability_map.py --properties 512 --scenarios 500 --
 
 Les fichiers generes sont places dans `outputs/viability/` et ne sont pas
 versionnes. Leur fichier de metadonnees contient toute la configuration utile a
-la reproductibilite, les categories reglementaires et leurs sources.
+la reproductibilite, les categories reglementaires et leurs sources. Une
+validation hors echantillon mesure l'erreur numerique d'interpolation, jamais un
+taux de decisions positives.
 
 ## Monte Carlo propre a une opportunite
 
@@ -86,7 +87,7 @@ src/
 │   ├── stochastic/     # moteur monte carlo, distributions, generateur
 │   ├── analysis/       # statistiques et analyses de sensibilite
 │   ├── search_policy/  # solver inverse generant les criteres de recherche
-│   ├── viability/      # cartographie hors ligne des zones viables
+│   ├── viability/      # moteur hors ligne de surfaces de simulation numeriques
 │   ├── city_profiles.py# profils locaux : villes ciblees, encadrement, plafonds
 │   ├── diagnostics.py  # points bloquants, donnees manquantes et alertes metier
 │   ├── storage.py      # stockage SQLite local

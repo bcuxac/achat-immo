@@ -59,4 +59,4 @@ jobs:
           uv run python scripts/validate_viability_map.py \
             --properties 96 \
             --scenarios 100 \
-            --min-recall 0.95
+            --max-tri-mae 2.0

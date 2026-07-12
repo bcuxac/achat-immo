@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -14,11 +15,13 @@ from achat_immo.city_profiles import profile_for_city, supported_city_labels
 from achat_immo.models import RegimeFiscal
 from achat_immo.storage import (
     DatabaseConnection,
+    get_active_simulation_map,
     get_investment_profile,
+    list_annonces,
     list_investment_profile_versions,
     list_sourcing_queue,
     list_sourcing_runs,
-    list_viability_maps,
+    list_simulation_maps,
     save_investment_profile,
 )
 from app.runtime_config import configured_database_url, configured_gemini_api_key
@@ -33,39 +36,174 @@ DEFAULT_ALLOWED_DOMAINS = "jinka.fr,leboncoin.fr,seloger.com,bienici.com,pap.fr"
 def automation_page(conn: DatabaseConnection, *, database_target: str) -> None:
     st.header("Parametres / Automatisation")
     _render_investment_profile(conn)
-    _render_viability_maps(conn)
+    _render_simulation_maps(conn)
     _render_runtime_status(database_target)
     _render_github_actions_status(conn)
     _render_sourcing_policy()
 
 
-def _render_viability_maps(conn: DatabaseConnection) -> None:
-    st.subheader("Cartes de viabilite")
-    rows = list_viability_maps(conn, limit=10)
-    if not rows:
+def _render_simulation_maps(conn: DatabaseConnection) -> None:
+    st.subheader("Carte mathematique des simulations")
+    profile = get_investment_profile(conn)
+    active = get_active_simulation_map(
+        conn,
+        profile.target_city,
+        profile.simulation_fingerprint,
+    )
+    rows = list_simulation_maps(conn, limit=10)
+    if active is None:
         st.warning(
             "Aucune carte active. Le sourcing continuera en analyse approfondie sans prefiltrage. "
             "Lance le workflow GitHub 'Cartographie de viabilite' ou le script local."
         )
         return
-    latest = rows[0]
+    map_id, simulation_map = active
+    points = _simulation_points_dataframe(simulation_map)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Ville", str(latest["city"]))
-    c2.metric("Points", int(latest["point_count"]))
-    c3.metric("Points rentables", int(latest["viable_count"]))
-    c4.metric("Active", "oui" if latest["active"] else "non")
-    if int(latest["viable_count"]) == 0:
-        st.warning("Cette carte ne contient aucun point viable : elle est non conclusive et ne rejettera aucune annonce.")
+    c1.metric("Ville", simulation_map.config.market.city)
+    c2.metric("Simulations structurelles", len(points))
+    c3.metric("TRI median central", f"{points['tri_median'].median():.2f} %")
+    c4.metric("Carte active", f"#{map_id}")
+    st.caption(
+        "Cette carte ne qualifie et ne rejette aucun point. Les couleurs sont des sorties "
+        "numeriques conditionnelles aux entrees affichees dans le profil."
+    )
+    _render_simulation_scatter(conn, points, simulation_map.config.market.city)
     with st.expander("Historique des cartes", expanded=False):
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        history = pd.DataFrame(rows)
+        history = history.rename(columns={"profile_hash": "simulation_hash"})
+        st.dataframe(history, hide_index=True, width="stretch")
+
+
+def _simulation_points_dataframe(simulation_map) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "sample_id": point.property.sample_id,
+                "sample_kind": point.property.sample_kind,
+                "sector": point.property.rent_sector or "sans secteur",
+                "room_count": point.property.room_count,
+                "surface_m2": point.property.surface_m2,
+                "price_per_m2": point.property.price_per_m2,
+                "rent_per_m2": point.property.rent_per_m2,
+                "project_cost": point.property.total_project_cost,
+                "tri_median": point.tri_median,
+                "tri_p10": point.tri_p10,
+                "cashflow_year1_p10": point.first_year_monthly_cashflow_p10,
+                "cashflow_worst_median": point.prudent_monthly_cashflow,
+                "coc_median": point.cash_on_cash_median,
+            }
+            for point in simulation_map.points
+        ]
+    )
+
+
+def _render_simulation_scatter(
+    conn: DatabaseConnection,
+    points: pd.DataFrame,
+    city: str,
+) -> None:
+    metric_labels = {
+        "tri_median": "TRI median (%)",
+        "tri_p10": "TRI P10 (%)",
+        "cashflow_year1_p10": "Cash-flow annee 1 P10 (EUR/mois)",
+        "cashflow_worst_median": "Pire cash-flow median (EUR/mois)",
+        "coc_median": "Cash-on-cash median (%)",
+    }
+    c1, c2, c3 = st.columns(3)
+    color_metric = c1.selectbox(
+        "Couleur",
+        options=list(metric_labels),
+        format_func=metric_labels.get,
+        key="simulation_map_color",
+    )
+    sample_kinds = sorted(points["sample_kind"].dropna().unique())
+    selected_kinds = c2.multiselect(
+        "Plan d'experiences",
+        options=sample_kinds,
+        default=sample_kinds,
+        key="simulation_map_sample_kind",
+    )
+    room_options = sorted(int(value) for value in points["room_count"].dropna().unique())
+    selected_rooms = c3.multiselect(
+        "Nombre de pieces",
+        options=room_options,
+        default=room_options,
+        key="simulation_map_rooms",
+    )
+    filtered = points[
+        points["sample_kind"].isin(selected_kinds)
+        & (points["room_count"].isna() | points["room_count"].isin(selected_rooms))
+    ]
+    simulation_chart = (
+        alt.Chart(filtered)
+        .mark_circle(opacity=0.68)
+        .encode(
+            x=alt.X("price_per_m2:Q", title="Prix d'achat (EUR/m2)"),
+            y=alt.Y("rent_per_m2:Q", title="Loyer HC (EUR/m2/mois)"),
+            color=alt.Color(f"{color_metric}:Q", title=metric_labels[color_metric]),
+            size=alt.Size("project_cost:Q", title="Cout total", scale=alt.Scale(range=[25, 180])),
+            tooltip=[
+                "sample_id:Q",
+                "sample_kind:N",
+                "sector:N",
+                "room_count:Q",
+                alt.Tooltip("surface_m2:Q", format=".1f"),
+                alt.Tooltip("price_per_m2:Q", format=".0f"),
+                alt.Tooltip("rent_per_m2:Q", format=".2f"),
+                alt.Tooltip("tri_median:Q", format=".2f"),
+                alt.Tooltip("tri_p10:Q", format=".2f"),
+                alt.Tooltip("cashflow_year1_p10:Q", format=".0f"),
+            ],
+        )
+    )
+    annonces = pd.DataFrame(
+        [
+            {
+                "id": row["id"],
+                "price_per_m2": float(row["prix_affiche"]) / float(row["surface_m2"]),
+                "rent_per_m2": float(row["loyer_hc_mensuel"]) / float(row["surface_m2"]),
+                "quartier": row.get("quartier") or "",
+            }
+            for row in list_annonces(conn)
+            if str(row.get("ville") or "").casefold() == city.casefold()
+            and row.get("surface_m2")
+            and row.get("loyer_hc_mensuel")
+        ]
+    )
+    if not annonces.empty:
+        real_chart = (
+            alt.Chart(annonces)
+            .mark_point(shape="diamond", filled=True, color="black", size=180)
+            .encode(
+                x="price_per_m2:Q",
+                y="rent_per_m2:Q",
+                tooltip=["id:Q", "quartier:N", "price_per_m2:Q", "rent_per_m2:Q"],
+            )
+        )
+        simulation_chart = simulation_chart + real_chart
+    st.altair_chart(simulation_chart.properties(height=520), width="stretch")
+
+    pareto = (
+        alt.Chart(filtered)
+        .mark_circle(opacity=0.7)
+        .encode(
+            x=alt.X("tri_p10:Q", title="TRI P10 (%)"),
+            y=alt.Y("cashflow_year1_p10:Q", title="Cash-flow annee 1 P10 (EUR/mois)"),
+            color=alt.Color("tri_median:Q", title="TRI median (%)"),
+            tooltip=["sample_id:Q", "sample_kind:N", "tri_median:Q", "tri_p10:Q", "cashflow_year1_p10:Q"],
+        )
+    )
+    st.altair_chart(pareto.properties(height=420), width="stretch")
 
 
 def _render_investment_profile(conn: DatabaseConnection) -> None:
     profile = get_investment_profile(conn)
     st.subheader("Profil d'investissement")
     st.caption(
-        "Ces valeurs pilotent la future cartographie et les analyses approfondies. "
-        f"Configuration active : {profile.fingerprint[:12]}."
+        "Les entrees economiques pilotent la carte ; les objectifs personnels ne servent qu'aux "
+        "analyses detaillees et n'invalident plus la carte. "
+        f"Simulation : {profile.simulation_fingerprint[:12]} · Profil complet : {profile.fingerprint[:12]}."
     )
     if not profile.credit_rate_updated_on or not profile.credit_rate_source:
         st.warning("Le taux de credit actif n'est pas encore date et source.")
@@ -153,7 +291,7 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
             "CFE annuelle", min_value=0.0, value=profile.annual_cfe_cost, step=50.0
         )
 
-        st.markdown("**Objectifs de viabilite**")
+        st.markdown("**Preferences de decision — sans effet sur la carte**")
         c1, c2, c3, c4, c5 = st.columns(5)
         target_tri = c1.number_input("TRI median min (%)", value=profile.target_tri_median, step=0.5)
         target_tri_p10 = c2.number_input("TRI P10 min (%)", value=profile.target_tri_p10, step=0.5)
@@ -191,21 +329,6 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
                 min_value=0.0,
                 max_value=100.0,
                 value=profile.map_frontier_share * 100,
-                step=5.0,
-            )
-            c1, c2 = st.columns(2)
-            robust_neighbor_pct = c1.number_input(
-                "Voisins rentables pour qualification robuste (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=profile.prefilter_robust_neighbor_ratio * 100,
-                step=5.0,
-            )
-            potential_neighbor_pct = c2.number_input(
-                "Voisins rentables pour analyse potentielle (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=profile.prefilter_potential_neighbor_ratio * 100,
                 step=5.0,
             )
 
@@ -398,8 +521,6 @@ def _render_investment_profile(conn: DatabaseConnection) -> None:
                 map_scenarios_per_property=int(map_scenarios),
                 map_worker_count=int(map_workers),
                 map_frontier_share=float(map_frontier_share_pct) / 100,
-                prefilter_robust_neighbor_ratio=float(robust_neighbor_pct) / 100,
-                prefilter_potential_neighbor_ratio=float(potential_neighbor_pct) / 100,
                 rent_multiplier_low=float(rent_low),
                 rent_multiplier_mode=float(rent_mode),
                 rent_multiplier_high=float(rent_high),
